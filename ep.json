@@ -1,0 +1,11 @@
+{
+  "parts": [
+    {
+      "name": "main",
+      "client_hooks": {
+        "aceKeyEvent": "ep_vim/static/js/index",
+        "aceEditorCSS": "ep_vim/static/js/index"
+      }
+    }
+  ]
+}
