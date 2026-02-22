@@ -7,7 +7,10 @@ let visualMode = null;
 let visualAnchor = null;
 let visualCursor = null;
 let pendingKey = null;
+let pendingCount = null;
+let countBuffer = '';
 let register = null;
+let marks = {};
 let editorDoc = null;
 
 // --- Utility helpers ---
@@ -26,6 +29,36 @@ const firstNonBlank = (lineText) => {
   while (i < lineText.length && isWhitespace(lineText[i])) i++;
   return i;
 };
+
+const findCharForward = (lineText, startChar, targetChar, count) => {
+  let found = 0;
+  for (let i = startChar + 1; i < lineText.length; i++) {
+    if (lineText[i] === targetChar) {
+      found++;
+      if (found === count) return i;
+    }
+  }
+  return -1;
+};
+
+const findCharBackward = (lineText, startChar, targetChar, count) => {
+  let found = 0;
+  for (let i = startChar - 1; i >= 0; i--) {
+    if (lineText[i] === targetChar) {
+      found++;
+      if (found === count) return i;
+    }
+  }
+  return -1;
+};
+
+const consumeCount = () => {
+  if (pendingKey !== null) return;
+  pendingCount = countBuffer === '' ? null : parseInt(countBuffer, 10);
+  countBuffer = '';
+};
+
+const getCount = () => pendingCount || 1;
 
 // --- Etherpad API wrappers ---
 
@@ -109,6 +142,41 @@ const updateVisualSelection = (editorInfo, rep) => {
   selectRange(editorInfo, start, end);
 };
 
+// --- Word motion helpers ---
+
+const wordForward = (lineText, startChar) => {
+  let pos = startChar;
+  if (pos < lineText.length && isWordChar(lineText[pos])) {
+    while (pos < lineText.length && isWordChar(lineText[pos])) pos++;
+  } else if (pos < lineText.length && !isWhitespace(lineText[pos])) {
+    while (pos < lineText.length && !isWordChar(lineText[pos]) && !isWhitespace(lineText[pos])) pos++;
+  }
+  while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
+  return pos;
+};
+
+const wordBackward = (lineText, startChar) => {
+  let pos = startChar - 1;
+  while (pos >= 0 && isWhitespace(lineText[pos])) pos--;
+  if (pos >= 0 && isWordChar(lineText[pos])) {
+    while (pos > 0 && isWordChar(lineText[pos - 1])) pos--;
+  } else {
+    while (pos > 0 && !isWordChar(lineText[pos - 1]) && !isWhitespace(lineText[pos - 1])) pos--;
+  }
+  return Math.max(0, pos);
+};
+
+const wordEnd = (lineText, startChar) => {
+  let pos = startChar + 1;
+  while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
+  if (pos < lineText.length && isWordChar(lineText[pos])) {
+    while (pos + 1 < lineText.length && isWordChar(lineText[pos + 1])) pos++;
+  } else {
+    while (pos + 1 < lineText.length && !isWordChar(lineText[pos + 1]) && !isWhitespace(lineText[pos + 1])) pos++;
+  }
+  return pos;
+};
+
 // --- Visual mode key handler ---
 
 const handleVisualKey = (rep, editorInfo, key) => {
@@ -116,26 +184,76 @@ const handleVisualKey = (rep, editorInfo, key) => {
   const curChar = visualCursor[1];
   const lineText = getLineText(rep, curLine);
 
+  if (key >= '1' && key <= '9') {
+    countBuffer += key;
+    return true;
+  }
+  if (key === '0' && countBuffer !== '') {
+    countBuffer += key;
+    return true;
+  }
+
+  consumeCount();
+  const count = getCount();
+
+  if (pendingKey === 'f' || pendingKey === 'F' || pendingKey === 't' || pendingKey === 'T') {
+    const direction = pendingKey;
+    pendingKey = null;
+    let pos = -1;
+    if (direction === 'f') {
+      pos = findCharForward(lineText, curChar, key, count);
+    } else if (direction === 'F') {
+      pos = findCharBackward(lineText, curChar, key, count);
+    } else if (direction === 't') {
+      pos = findCharForward(lineText, curChar, key, count);
+      if (pos !== -1) pos = pos - 1;
+    } else if (direction === 'T') {
+      pos = findCharBackward(lineText, curChar, key, count);
+      if (pos !== -1) pos = pos + 1;
+    }
+    if (pos !== -1) {
+      visualCursor = [curLine, pos];
+      updateVisualSelection(editorInfo, rep);
+    }
+    return true;
+  }
+
+  if (pendingKey === "'" || pendingKey === '`') {
+    const jumpType = pendingKey;
+    pendingKey = null;
+    if (key >= 'a' && key <= 'z' && marks[key]) {
+      const [markLine, markChar] = marks[key];
+      if (jumpType === "'") {
+        const targetLineText = getLineText(rep, markLine);
+        visualCursor = [markLine, firstNonBlank(targetLineText)];
+      } else {
+        visualCursor = [markLine, markChar];
+      }
+      updateVisualSelection(editorInfo, rep);
+    }
+    return true;
+  }
+
   if (key === 'h') {
-    visualCursor = [curLine, Math.max(0, curChar - 1)];
+    visualCursor = [curLine, Math.max(0, curChar - count)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === 'l') {
-    visualCursor = [curLine, clampChar(curChar + 1, lineText)];
+    visualCursor = [curLine, clampChar(curChar + count, lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === 'j') {
-    visualCursor = [clampLine(curLine + 1, rep), curChar];
+    visualCursor = [clampLine(curLine + count, rep), curChar];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === 'k') {
-    visualCursor = [clampLine(curLine - 1, rep), curChar];
+    visualCursor = [clampLine(curLine - count, rep), curChar];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
@@ -160,38 +278,23 @@ const handleVisualKey = (rep, editorInfo, key) => {
 
   if (key === 'w') {
     let pos = curChar;
-    if (pos < lineText.length && isWordChar(lineText[pos])) {
-      while (pos < lineText.length && isWordChar(lineText[pos])) pos++;
-    } else if (pos < lineText.length && !isWhitespace(lineText[pos])) {
-      while (pos < lineText.length && !isWordChar(lineText[pos]) && !isWhitespace(lineText[pos])) pos++;
-    }
-    while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
+    for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
     visualCursor = [curLine, clampChar(pos, lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === 'b') {
-    let pos = curChar - 1;
-    while (pos >= 0 && isWhitespace(lineText[pos])) pos--;
-    if (pos >= 0 && isWordChar(lineText[pos])) {
-      while (pos > 0 && isWordChar(lineText[pos - 1])) pos--;
-    } else {
-      while (pos > 0 && !isWordChar(lineText[pos - 1]) && !isWhitespace(lineText[pos - 1])) pos--;
-    }
-    visualCursor = [curLine, Math.max(0, pos)];
+    let pos = curChar;
+    for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
+    visualCursor = [curLine, pos];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === 'e') {
-    let pos = curChar + 1;
-    while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
-    if (pos < lineText.length && isWordChar(lineText[pos])) {
-      while (pos + 1 < lineText.length && isWordChar(lineText[pos + 1])) pos++;
-    } else {
-      while (pos + 1 < lineText.length && !isWordChar(lineText[pos + 1]) && !isWhitespace(lineText[pos + 1])) pos++;
-    }
+    let pos = curChar;
+    for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
     visualCursor = [curLine, clampChar(pos, lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
@@ -199,7 +302,11 @@ const handleVisualKey = (rep, editorInfo, key) => {
 
   if (key === 'G') {
     pendingKey = null;
-    visualCursor = [rep.lines.length() - 1, curChar];
+    if (pendingCount !== null) {
+      visualCursor = [clampLine(pendingCount - 1, rep), curChar];
+    } else {
+      visualCursor = [rep.lines.length() - 1, curChar];
+    }
     updateVisualSelection(editorInfo, rep);
     return true;
   }
@@ -212,6 +319,16 @@ const handleVisualKey = (rep, editorInfo, key) => {
     } else {
       pendingKey = 'g';
     }
+    return true;
+  }
+
+  if (key === 'f' || key === 'F' || key === 't' || key === 'T') {
+    pendingKey = key;
+    return true;
+  }
+
+  if (key === "'" || key === '`') {
+    pendingKey = key;
     return true;
   }
 
@@ -285,6 +402,18 @@ const handleNormalKey = (rep, editorInfo, key) => {
   const lineCount = rep.lines.length();
   const lineText = getLineText(rep, line);
 
+  if (key >= '1' && key <= '9') {
+    countBuffer += key;
+    return true;
+  }
+  if (key === '0' && countBuffer !== '') {
+    countBuffer += key;
+    return true;
+  }
+
+  consumeCount();
+  const count = getCount();
+
   if (pendingKey === 'r') {
     pendingKey = null;
     if (lineText.length > 0) {
@@ -294,25 +423,173 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (pendingKey === 'f' || pendingKey === 'F' || pendingKey === 't' || pendingKey === 'T') {
+    const direction = pendingKey;
+    pendingKey = null;
+    let pos = -1;
+    if (direction === 'f') {
+      pos = findCharForward(lineText, char, key, count);
+    } else if (direction === 'F') {
+      pos = findCharBackward(lineText, char, key, count);
+    } else if (direction === 't') {
+      pos = findCharForward(lineText, char, key, count);
+      if (pos !== -1) pos = pos - 1;
+    } else if (direction === 'T') {
+      pos = findCharBackward(lineText, char, key, count);
+      if (pos !== -1) pos = pos + 1;
+    }
+    if (pos !== -1) moveCursor(editorInfo, line, pos);
+    return true;
+  }
+
+  if (pendingKey === 'df' || pendingKey === 'dF' || pendingKey === 'dt' || pendingKey === 'dT') {
+    const motion = pendingKey[1];
+    pendingKey = null;
+    let pos = -1;
+    if (motion === 'f' || motion === 't') {
+      pos = findCharForward(lineText, char, key, count);
+    } else {
+      pos = findCharBackward(lineText, char, key, count);
+    }
+    if (pos !== -1) {
+      let delStart = char;
+      let delEnd = char;
+      if (motion === 'f') {
+        delStart = char;
+        delEnd = pos + 1;
+      } else if (motion === 't') {
+        delStart = char;
+        delEnd = pos;
+      } else if (motion === 'F') {
+        delStart = pos;
+        delEnd = char + 1;
+      } else if (motion === 'T') {
+        delStart = pos + 1;
+        delEnd = char + 1;
+      }
+      if (delEnd > delStart) {
+        register = lineText.slice(delStart, delEnd);
+        replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+        const newLineText = getLineText(rep, line);
+        moveCursor(editorInfo, line, clampChar(delStart, newLineText));
+      }
+    }
+    return true;
+  }
+
+  if (pendingKey === 'd') {
+    pendingKey = null;
+
+    if (key === 'd') {
+      const deleteCount = Math.min(count, lineCount - line);
+      const lastDeleteLine = line + deleteCount - 1;
+      if (lastDeleteLine === lineCount - 1 && line > 0) {
+        const prevLineText = getLineText(rep, line - 1);
+        replaceRange(editorInfo, [line - 1, prevLineText.length], [lastDeleteLine, getLineText(rep, lastDeleteLine).length], '');
+        moveCursor(editorInfo, line - 1, clampChar(char, prevLineText));
+      } else if (lineCount > deleteCount) {
+        replaceRange(editorInfo, [line, 0], [lastDeleteLine + 1, 0], '');
+        const newLineText = getLineText(rep, line);
+        moveCursor(editorInfo, line, clampChar(char, newLineText));
+      } else {
+        replaceRange(editorInfo, [0, 0], [lastDeleteLine, getLineText(rep, lastDeleteLine).length], '');
+        moveCursor(editorInfo, 0, 0);
+      }
+      return true;
+    }
+
+    if (key === 'f' || key === 'F' || key === 't' || key === 'T') {
+      pendingKey = 'd' + key;
+      return true;
+    }
+
+    let delStart = -1;
+    let delEnd = -1;
+
+    if (key === 'w') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
+      delStart = char;
+      delEnd = Math.min(pos, lineText.length);
+    } else if (key === 'e') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
+      delStart = char;
+      delEnd = Math.min(pos + 1, lineText.length);
+    } else if (key === 'b') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
+      delStart = pos;
+      delEnd = char;
+    } else if (key === '$') {
+      delStart = char;
+      delEnd = lineText.length;
+    } else if (key === '0') {
+      delStart = 0;
+      delEnd = char;
+    } else if (key === '^') {
+      const fnb = firstNonBlank(lineText);
+      delStart = Math.min(char, fnb);
+      delEnd = Math.max(char, fnb);
+    } else if (key === 'h') {
+      delStart = Math.max(0, char - count);
+      delEnd = char;
+    } else if (key === 'l') {
+      delStart = char;
+      delEnd = Math.min(char + count, lineText.length);
+    }
+
+    if (delEnd > delStart && delStart !== -1) {
+      register = lineText.slice(delStart, delEnd);
+      replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+      const newLineText = getLineText(rep, line);
+      moveCursor(editorInfo, line, clampChar(delStart, newLineText));
+    }
+    return true;
+  }
+
+  if (pendingKey === 'm') {
+    pendingKey = null;
+    if (key >= 'a' && key <= 'z') {
+      marks[key] = [line, char];
+    }
+    return true;
+  }
+
+  if (pendingKey === "'" || pendingKey === '`') {
+    const jumpType = pendingKey;
+    pendingKey = null;
+    if (key >= 'a' && key <= 'z' && marks[key]) {
+      const [markLine, markChar] = marks[key];
+      if (jumpType === "'") {
+        const targetLineText = getLineText(rep, markLine);
+        moveCursor(editorInfo, markLine, firstNonBlank(targetLineText));
+      } else {
+        moveCursor(editorInfo, markLine, markChar);
+      }
+    }
+    return true;
+  }
+
   if (key === 'h') {
-    moveCursor(editorInfo, line, Math.max(0, char - 1));
+    moveCursor(editorInfo, line, Math.max(0, char - count));
     return true;
   }
 
   if (key === 'l') {
-    moveCursor(editorInfo, line, clampChar(char + 1, lineText));
+    moveCursor(editorInfo, line, clampChar(char + count, lineText));
     return true;
   }
 
   if (key === 'k') {
-    const newLine = clampLine(line - 1, rep);
+    const newLine = clampLine(line - count, rep);
     const newLineText = getLineText(rep, newLine);
     moveCursor(editorInfo, newLine, clampChar(char, newLineText));
     return true;
   }
 
   if (key === 'j') {
-    const newLine = clampLine(line + 1, rep);
+    const newLine = clampLine(line + count, rep);
     const newLineText = getLineText(rep, newLine);
     moveCursor(editorInfo, newLine, clampChar(char, newLineText));
     return true;
@@ -335,7 +612,8 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (key === 'x') {
     if (lineText.length > 0) {
-      replaceRange(editorInfo, [line, char], [line, char + 1], '');
+      const deleteCount = Math.min(count, lineText.length - char);
+      replaceRange(editorInfo, [line, char], [line, char + deleteCount], '');
       const newLineText = getLineText(rep, line);
       moveCursor(editorInfo, line, clampChar(char, newLineText));
     }
@@ -344,25 +622,15 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (key === 'w') {
     let pos = char;
-    if (pos < lineText.length && isWordChar(lineText[pos])) {
-      while (pos < lineText.length && isWordChar(lineText[pos])) pos++;
-    } else if (pos < lineText.length && !isWhitespace(lineText[pos])) {
-      while (pos < lineText.length && !isWordChar(lineText[pos]) && !isWhitespace(lineText[pos])) pos++;
-    }
-    while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
+    for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
     moveCursor(editorInfo, line, clampChar(pos, lineText));
     return true;
   }
 
   if (key === 'b') {
-    let pos = char - 1;
-    while (pos >= 0 && isWhitespace(lineText[pos])) pos--;
-    if (pos >= 0 && isWordChar(lineText[pos])) {
-      while (pos > 0 && isWordChar(lineText[pos - 1])) pos--;
-    } else {
-      while (pos > 0 && !isWordChar(lineText[pos - 1]) && !isWhitespace(lineText[pos - 1])) pos--;
-    }
-    moveCursor(editorInfo, line, Math.max(0, pos));
+    let pos = char;
+    for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
+    moveCursor(editorInfo, line, pos);
     return true;
   }
 
@@ -414,7 +682,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === 'G') {
-    moveCursor(editorInfo, lineCount - 1, 0);
+    if (pendingCount !== null) {
+      moveCursor(editorInfo, clampLine(pendingCount - 1, rep), 0);
+    } else {
+      moveCursor(editorInfo, lineCount - 1, 0);
+    }
     return true;
   }
 
@@ -435,38 +707,31 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (key === 'f' || key === 'F' || key === 't' || key === 'T') {
+    pendingKey = key;
+    return true;
+  }
+
+  if (key === 'm') {
+    pendingKey = 'm';
+    return true;
+  }
+
+  if (key === "'" || key === '`') {
+    pendingKey = key;
+    return true;
+  }
+
   if (key === 'd') {
-    if (pendingKey === 'd') {
-      pendingKey = null;
-      const isLastLine = line === lineCount - 1;
-      if (isLastLine && lineCount > 1) {
-        const prevLineText = getLineText(rep, line - 1);
-        replaceRange(editorInfo, [line - 1, prevLineText.length], [line, lineText.length], '');
-        moveCursor(editorInfo, line - 1, clampChar(char, prevLineText));
-      } else if (lineCount > 1) {
-        replaceRange(editorInfo, [line, 0], [line + 1, 0], '');
-        const newLineText = getLineText(rep, line);
-        moveCursor(editorInfo, line, clampChar(char, newLineText));
-      } else {
-        replaceRange(editorInfo, [0, 0], [0, lineText.length], '');
-        moveCursor(editorInfo, 0, 0);
-      }
-    } else {
-      pendingKey = 'd';
-    }
+    pendingKey = 'd';
     return true;
   }
 
   pendingKey = null;
 
   if (key === 'e') {
-    let pos = char + 1;
-    while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
-    if (pos < lineText.length && isWordChar(lineText[pos])) {
-      while (pos + 1 < lineText.length && isWordChar(lineText[pos + 1])) pos++;
-    } else {
-      while (pos + 1 < lineText.length && !isWordChar(lineText[pos + 1]) && !isWhitespace(lineText[pos + 1])) pos++;
-    }
+    let pos = char;
+    for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
     moveCursor(editorInfo, line, clampChar(pos, lineText));
     return true;
   }
@@ -543,6 +808,9 @@ exports.aceKeyEvent = (_hookName, {evt, rep, editorInfo}) => {
       const [line] = rep.selStart;
       moveCursor(editorInfo, line, 0);
     }
+    countBuffer = '';
+    pendingKey = null;
+    pendingCount = null;
     evt.preventDefault();
     return true;
   }
