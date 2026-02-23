@@ -78,10 +78,19 @@ const moveCursor = (editorInfo, line, char) => {
   });
 };
 
+const clearEmptyLineCursor = () => {
+  if (!editorDoc) return;
+  const old = editorDoc.querySelector('.vim-empty-line-cursor');
+  if (old) old.classList.remove('vim-empty-line-cursor');
+};
+
 const moveBlockCursor = (editorInfo, line, char) => {
+  clearEmptyLineCursor();
   const lineText = currentRep ? getLineText(currentRep, line) : '';
-  if (lineText.length === 0 && currentRep && line + 1 < currentRep.lines.length()) {
-    selectRange(editorInfo, [line, 0], [line + 1, 0]);
+  if (lineText.length === 0 && editorDoc) {
+    const lineDiv = editorDoc.body.querySelectorAll('div')[line];
+    if (lineDiv) lineDiv.classList.add('vim-empty-line-cursor');
+    selectRange(editorInfo, [line, 0], [line, 0]);
   } else {
     selectRange(editorInfo, [line, char], [line, char + 1]);
   }
@@ -108,6 +117,7 @@ const undo = (editorInfo) => {
 
 const setInsertMode = (value) => {
   insertMode = value;
+  if (value) clearEmptyLineCursor();
   if (editorDoc) {
     editorDoc.body.classList.toggle('vim-insert-mode', value);
   }
