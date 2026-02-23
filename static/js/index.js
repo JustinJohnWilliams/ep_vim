@@ -13,6 +13,7 @@ let countBuffer = '';
 let register = null;
 let marks = {};
 let editorDoc = null;
+let currentRep = null;
 
 // --- Utility helpers ---
 
@@ -72,7 +73,12 @@ const moveCursor = (editorInfo, line, char) => {
 };
 
 const moveBlockCursor = (editorInfo, line, char) => {
-  selectRange(editorInfo, [line, char], [line, char + 1]);
+  const lineText = currentRep ? getLineText(currentRep, line) : '';
+  if (lineText.length === 0 && currentRep && line + 1 < currentRep.lines.length()) {
+    selectRange(editorInfo, [line, 0], [line + 1, 0]);
+  } else {
+    selectRange(editorInfo, [line, char], [line, char + 1]);
+  }
 };
 
 const selectRange = (editorInfo, start, end) => {
@@ -905,6 +911,7 @@ exports.postToolbarInit = (_hookName, _args) => {
 exports.aceKeyEvent = (_hookName, {evt, rep, editorInfo}) => {
   if (!vimEnabled) return false;
   if (evt.type !== 'keydown') return false;
+  currentRep = rep;
   if (!editorDoc) {
     editorDoc = evt.target.ownerDocument;
     setInsertMode(insertMode);
@@ -968,9 +975,9 @@ exports.aceKeyEvent = (_hookName, {evt, rep, editorInfo}) => {
       moveBlockCursor(editorInfo, line, Math.max(0, char - 1));
     }
     if (visualMode !== null) {
+      const [vLine, vChar] = visualCursor;
       setVisualMode(null);
-      const [line] = rep.selStart;
-      moveBlockCursor(editorInfo, line, 0);
+      moveBlockCursor(editorInfo, vLine, vChar);
     }
     countBuffer = '';
     pendingKey = null;
