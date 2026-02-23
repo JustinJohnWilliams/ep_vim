@@ -1,6 +1,10 @@
 body.vim-insert-mode {
 }
 
+.vim-empty-line-cursor {
+  caret-color: transparent;
+}
+
 .vim-empty-line-cursor::before {
   content: '\00a0';
   background: Highlight;
