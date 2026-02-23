@@ -528,6 +528,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
     if (key === 'd') {
       const deleteCount = Math.min(count, lineCount - line);
       const lastDeleteLine = line + deleteCount - 1;
+      const deletedLines = [];
+      for (let i = line; i <= lastDeleteLine; i++) {
+        deletedLines.push(getLineText(rep, i));
+      }
+      setRegister(deletedLines);
       if (lastDeleteLine === lineCount - 1 && line > 0) {
         const prevLineText = getLineText(rep, line - 1);
         replaceRange(editorInfo, [line - 1, prevLineText.length], [lastDeleteLine, getLineText(rep, lastDeleteLine).length], '');
