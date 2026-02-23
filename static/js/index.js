@@ -2,6 +2,7 @@
 
 // --- State variables ---
 
+let vimEnabled = false;
 let insertMode = false;
 let visualMode = null;
 let visualAnchor = null;
@@ -743,7 +744,17 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
 exports.aceEditorCSS = () => ['ep_vim/static/css/vim.css'];
 
+exports.postToolbarInit = (_hookName, _args) => {
+  const btn = document.getElementById('vim-toggle-btn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    vimEnabled = !vimEnabled;
+    btn.classList.toggle('vim-enabled', vimEnabled);
+  });
+};
+
 exports.aceKeyEvent = (_hookName, {evt, rep, editorInfo}) => {
+  if (!vimEnabled) return false;
   if (evt.type !== 'keydown') return false;
   if (!editorDoc) {
     editorDoc = evt.target.ownerDocument;
