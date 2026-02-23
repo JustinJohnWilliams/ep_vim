@@ -356,7 +356,8 @@ const handleVisualKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (key === 'd') {
+  if (key === 'd' || key === 'c') {
+    const enterInsert = key === 'c';
     const [start, end] = getVisualSelection(rep);
 
     if (visualMode === 'char') {
@@ -364,6 +365,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
       replaceRange(editorInfo, start, end, '');
       moveCursor(editorInfo, start[0], start[1]);
       setVisualMode(null);
+      if (enterInsert) setInsertMode(true);
       return true;
     }
 
@@ -375,6 +377,17 @@ const handleVisualKey = (rep, editorInfo, key) => {
       lines.push(getLineText(rep, i));
     }
     register = lines;
+
+    if (enterInsert) {
+      for (let i = topLine; i <= bottomLine; i++) {
+        const text = getLineText(rep, i);
+        replaceRange(editorInfo, [topLine, 0], [topLine, text.length], '');
+      }
+      moveCursor(editorInfo, topLine, 0);
+      setVisualMode(null);
+      setInsertMode(true);
+      return true;
+    }
 
     if (bottomLine === totalLines - 1 && topLine > 0) {
       const prevLineLen = getLineText(rep, topLine - 1).length;
@@ -545,6 +558,102 @@ const handleNormalKey = (rep, editorInfo, key) => {
       replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
       const newLineText = getLineText(rep, line);
       moveCursor(editorInfo, line, clampChar(delStart, newLineText));
+    }
+    return true;
+  }
+
+  if (pendingKey === 'cf' || pendingKey === 'cF' || pendingKey === 'ct' || pendingKey === 'cT') {
+    const motion = pendingKey[1];
+    pendingKey = null;
+    let pos = -1;
+    if (motion === 'f' || motion === 't') {
+      pos = findCharForward(lineText, char, key, count);
+    } else {
+      pos = findCharBackward(lineText, char, key, count);
+    }
+    if (pos !== -1) {
+      let delStart = char;
+      let delEnd = char;
+      if (motion === 'f') {
+        delStart = char;
+        delEnd = pos + 1;
+      } else if (motion === 't') {
+        delStart = char;
+        delEnd = pos;
+      } else if (motion === 'F') {
+        delStart = pos;
+        delEnd = char + 1;
+      } else if (motion === 'T') {
+        delStart = pos + 1;
+        delEnd = char + 1;
+      }
+      if (delEnd > delStart) {
+        register = lineText.slice(delStart, delEnd);
+        replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+        moveCursor(editorInfo, line, delStart);
+        setInsertMode(true);
+      }
+    }
+    return true;
+  }
+
+  if (pendingKey === 'c') {
+    pendingKey = null;
+
+    if (key === 'c') {
+      register = lineText;
+      replaceRange(editorInfo, [line, 0], [line, lineText.length], '');
+      moveCursor(editorInfo, line, 0);
+      setInsertMode(true);
+      return true;
+    }
+
+    if (key === 'f' || key === 'F' || key === 't' || key === 'T') {
+      pendingKey = 'c' + key;
+      return true;
+    }
+
+    let delStart = -1;
+    let delEnd = -1;
+
+    if (key === 'w') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
+      delStart = char;
+      delEnd = Math.min(pos, lineText.length);
+    } else if (key === 'e') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
+      delStart = char;
+      delEnd = Math.min(pos + 1, lineText.length);
+    } else if (key === 'b') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
+      delStart = pos;
+      delEnd = char;
+    } else if (key === '$') {
+      delStart = char;
+      delEnd = lineText.length;
+    } else if (key === '0') {
+      delStart = 0;
+      delEnd = char;
+    } else if (key === '^') {
+      const fnb = firstNonBlank(lineText);
+      delStart = Math.min(char, fnb);
+      delEnd = Math.max(char, fnb);
+    } else if (key === 'h') {
+      delStart = Math.max(0, char - count);
+      delEnd = char;
+    } else if (key === 'l') {
+      delStart = char;
+      delEnd = Math.min(char + count, lineText.length);
+    }
+
+    if (delEnd > delStart && delStart !== -1) {
+      register = lineText.slice(delStart, delEnd);
+      replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+      moveCursor(editorInfo, line, delStart);
+      setInsertMode(true);
     }
     return true;
   }
@@ -725,6 +834,35 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (key === 'd') {
     pendingKey = 'd';
+    return true;
+  }
+
+  if (key === 'c') {
+    pendingKey = 'c';
+    return true;
+  }
+
+  if (key === 'C') {
+    register = lineText.slice(char);
+    replaceRange(editorInfo, [line, char], [line, lineText.length], '');
+    moveCursor(editorInfo, line, char);
+    setInsertMode(true);
+    return true;
+  }
+
+  if (key === 's') {
+    register = lineText.slice(char, char + 1);
+    replaceRange(editorInfo, [line, char], [line, Math.min(char + count, lineText.length)], '');
+    moveCursor(editorInfo, line, char);
+    setInsertMode(true);
+    return true;
+  }
+
+  if (key === 'S') {
+    register = lineText;
+    replaceRange(editorInfo, [line, 0], [line, lineText.length], '');
+    moveCursor(editorInfo, line, 0);
+    setInsertMode(true);
     return true;
   }
 
