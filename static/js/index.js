@@ -62,6 +62,12 @@ const consumeCount = () => {
 
 const getCount = () => pendingCount || 1;
 
+const setRegister = (value) => {
+  register = value;
+  const text = Array.isArray(value) ? value.join('\n') + '\n' : value;
+  navigator.clipboard.writeText(text).catch(() => {});
+};
+
 // --- Etherpad API wrappers ---
 
 const moveCursor = (editorInfo, line, char) => {
@@ -348,7 +354,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
 
     if (visualMode === 'char') {
       const [, end] = getVisualSelection(rep);
-      register = getTextInRange(rep, start, end);
+      setRegister(getTextInRange(rep, start, end));
       setVisualMode(null);
       moveBlockCursor(editorInfo, start[0], start[1]);
       return true;
@@ -360,7 +366,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
     for (let i = topLine; i <= bottomLine; i++) {
       lines.push(getLineText(rep, i));
     }
-    register = lines;
+    setRegister(lines);
     setVisualMode(null);
     moveBlockCursor(editorInfo, topLine, 0);
     return true;
@@ -371,7 +377,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
     const [start, end] = getVisualSelection(rep);
 
     if (visualMode === 'char') {
-      register = getTextInRange(rep, start, end);
+      setRegister(getTextInRange(rep, start, end));
       replaceRange(editorInfo, start, end, '');
       if (enterInsert) {
         moveCursor(editorInfo, start[0], start[1]);
@@ -391,7 +397,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
     for (let i = topLine; i <= bottomLine; i++) {
       lines.push(getLineText(rep, i));
     }
-    register = lines;
+    setRegister(lines);
 
     if (enterInsert) {
       for (let i = topLine; i <= bottomLine; i++) {
@@ -497,7 +503,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
         delEnd = char + 1;
       }
       if (delEnd > delStart) {
-        register = lineText.slice(delStart, delEnd);
+        setRegister(lineText.slice(delStart, delEnd));
         replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
         const newLineText = getLineText(rep, line);
         moveBlockCursor(editorInfo, line, clampChar(delStart, newLineText));
@@ -569,7 +575,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
     }
 
     if (delEnd > delStart && delStart !== -1) {
-      register = lineText.slice(delStart, delEnd);
+      setRegister(lineText.slice(delStart, delEnd));
       replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
       const newLineText = getLineText(rep, line);
       moveBlockCursor(editorInfo, line, clampChar(delStart, newLineText));
@@ -603,7 +609,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
         delEnd = char + 1;
       }
       if (delEnd > delStart) {
-        register = lineText.slice(delStart, delEnd);
+        setRegister(lineText.slice(delStart, delEnd));
         replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
         moveCursor(editorInfo, line, delStart);
         setInsertMode(true);
@@ -616,7 +622,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
     pendingKey = null;
 
     if (key === 'c') {
-      register = lineText;
+      setRegister(lineText);
       replaceRange(editorInfo, [line, 0], [line, lineText.length], '');
       moveCursor(editorInfo, line, 0);
       setInsertMode(true);
@@ -665,7 +671,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
     }
 
     if (delEnd > delStart && delStart !== -1) {
-      register = lineText.slice(delStart, delEnd);
+      setRegister(lineText.slice(delStart, delEnd));
       replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
       moveCursor(editorInfo, line, delStart);
       setInsertMode(true);
@@ -858,7 +864,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === 'C') {
-    register = lineText.slice(char);
+    setRegister(lineText.slice(char));
     replaceRange(editorInfo, [line, char], [line, lineText.length], '');
     moveCursor(editorInfo, line, char);
     setInsertMode(true);
@@ -866,7 +872,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === 's') {
-    register = lineText.slice(char, char + 1);
+    setRegister(lineText.slice(char, char + 1));
     replaceRange(editorInfo, [line, char], [line, Math.min(char + count, lineText.length)], '');
     moveCursor(editorInfo, line, char);
     setInsertMode(true);
@@ -874,7 +880,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === 'S') {
-    register = lineText;
+    setRegister(lineText);
     replaceRange(editorInfo, [line, 0], [line, lineText.length], '');
     moveCursor(editorInfo, line, 0);
     setInsertMode(true);
