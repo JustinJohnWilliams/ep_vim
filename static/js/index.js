@@ -1,5 +1,20 @@
 'use strict';
 
+const {
+  clampLine,
+  clampChar,
+  getLineText,
+  firstNonBlank,
+  wordForward,
+  wordBackward,
+  wordEnd,
+  charSearchPos,
+  motionRange,
+  charMotionRange,
+  getVisualSelection,
+  getTextInRange,
+} = require('./vim-core');
+
 // --- State variables ---
 
 let vimEnabled = localStorage.getItem('ep_vimEnabled') === 'true';
@@ -15,44 +30,7 @@ let marks = {};
 let editorDoc = null;
 let currentRep = null;
 
-// --- Utility helpers ---
-
-const isWordChar = (ch) => /\w/.test(ch);
-const isWhitespace = (ch) => /\s/.test(ch);
-
-const clampLine = (line, rep) => Math.max(0, Math.min(line, rep.lines.length() - 1));
-
-const clampChar = (char, lineText) => Math.max(0, Math.min(char, lineText.length - 1));
-
-const getLineText = (rep, line) => rep.lines.atIndex(line).text;
-
-const firstNonBlank = (lineText) => {
-  let i = 0;
-  while (i < lineText.length && isWhitespace(lineText[i])) i++;
-  return i;
-};
-
-const findCharForward = (lineText, startChar, targetChar, count) => {
-  let found = 0;
-  for (let i = startChar + 1; i < lineText.length; i++) {
-    if (lineText[i] === targetChar) {
-      found++;
-      if (found === count) return i;
-    }
-  }
-  return -1;
-};
-
-const findCharBackward = (lineText, startChar, targetChar, count) => {
-  let found = 0;
-  for (let i = startChar - 1; i >= 0; i--) {
-    if (lineText[i] === targetChar) {
-      found++;
-      if (found === count) return i;
-    }
-  }
-  return -1;
-};
+// --- Count helpers ---
 
 const consumeCount = () => {
   if (countBuffer !== '') {
@@ -65,13 +43,13 @@ const consumeCount = () => {
 
 const getCount = () => pendingCount || 1;
 
+// --- Side-effectful helpers ---
+
 const setRegister = (value) => {
   register = value;
   const text = Array.isArray(value) ? value.join('\n') + '\n' : value;
   navigator.clipboard.writeText(text).catch(() => {});
 };
-
-// --- Etherpad API wrappers ---
 
 const moveCursor = (editorInfo, line, char) => {
   const pos = [line, char];
@@ -136,75 +114,9 @@ const setVisualMode = (value) => {
 
 // --- Visual mode helpers ---
 
-const getVisualSelection = (rep) => {
-  if (visualMode === 'line') {
-    const topLine = Math.min(visualAnchor[0], visualCursor[0]);
-    const bottomLine = Math.max(visualAnchor[0], visualCursor[0]);
-    const lineCount = rep.lines.length();
-    const start = [topLine, 0];
-    const end = bottomLine + 1 < lineCount
-      ? [bottomLine + 1, 0]
-      : [bottomLine, getLineText(rep, bottomLine).length];
-    return [start, end];
-  }
-  if (visualAnchor[0] < visualCursor[0] ||
-      (visualAnchor[0] === visualCursor[0] && visualAnchor[1] <= visualCursor[1])) {
-    return [visualAnchor, visualCursor];
-  }
-  return [visualCursor, visualAnchor];
-};
-
-const getTextInRange = (rep, start, end) => {
-  if (start[0] === end[0]) {
-    return getLineText(rep, start[0]).slice(start[1], end[1]);
-  }
-  const parts = [];
-  parts.push(getLineText(rep, start[0]).slice(start[1]));
-  for (let i = start[0] + 1; i < end[0]; i++) {
-    parts.push(getLineText(rep, i));
-  }
-  parts.push(getLineText(rep, end[0]).slice(0, end[1]));
-  return parts.join('\n');
-};
-
 const updateVisualSelection = (editorInfo, rep) => {
-  const [start, end] = getVisualSelection(rep);
+  const [start, end] = getVisualSelection(visualMode, visualAnchor, visualCursor, rep);
   selectRange(editorInfo, start, end);
-};
-
-// --- Word motion helpers ---
-
-const wordForward = (lineText, startChar) => {
-  let pos = startChar;
-  if (pos < lineText.length && isWordChar(lineText[pos])) {
-    while (pos < lineText.length && isWordChar(lineText[pos])) pos++;
-  } else if (pos < lineText.length && !isWhitespace(lineText[pos])) {
-    while (pos < lineText.length && !isWordChar(lineText[pos]) && !isWhitespace(lineText[pos])) pos++;
-  }
-  while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
-  return pos;
-};
-
-const wordBackward = (lineText, startChar) => {
-  let pos = startChar - 1;
-  while (pos >= 0 && isWhitespace(lineText[pos])) pos--;
-  if (pos >= 0 && isWordChar(lineText[pos])) {
-    while (pos > 0 && isWordChar(lineText[pos - 1])) pos--;
-  } else {
-    while (pos > 0 && !isWordChar(lineText[pos - 1]) && !isWhitespace(lineText[pos - 1])) pos--;
-  }
-  return Math.max(0, pos);
-};
-
-const wordEnd = (lineText, startChar) => {
-  let pos = startChar + 1;
-  while (pos < lineText.length && isWhitespace(lineText[pos])) pos++;
-  if (pos < lineText.length && isWordChar(lineText[pos])) {
-    while (pos + 1 < lineText.length && isWordChar(lineText[pos + 1])) pos++;
-  } else {
-    while (pos + 1 < lineText.length && !isWordChar(lineText[pos + 1]) && !isWhitespace(lineText[pos + 1])) pos++;
-  }
-  return pos;
 };
 
 // --- Visual mode key handler ---
@@ -229,18 +141,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
   if (pendingKey === 'f' || pendingKey === 'F' || pendingKey === 't' || pendingKey === 'T') {
     const direction = pendingKey;
     pendingKey = null;
-    let pos = -1;
-    if (direction === 'f') {
-      pos = findCharForward(lineText, curChar, key, count);
-    } else if (direction === 'F') {
-      pos = findCharBackward(lineText, curChar, key, count);
-    } else if (direction === 't') {
-      pos = findCharForward(lineText, curChar, key, count);
-      if (pos !== -1) pos = pos - 1;
-    } else if (direction === 'T') {
-      pos = findCharBackward(lineText, curChar, key, count);
-      if (pos !== -1) pos = pos + 1;
-    }
+    const pos = charSearchPos(direction, lineText, curChar, key, count);
     if (pos !== -1) {
       visualCursor = [curLine, pos];
       updateVisualSelection(editorInfo, rep);
@@ -363,10 +264,10 @@ const handleVisualKey = (rep, editorInfo, key) => {
   }
 
   if (key === 'y') {
-    const [start] = getVisualSelection(rep);
+    const [start] = getVisualSelection(visualMode, visualAnchor, visualCursor, rep);
 
     if (visualMode === 'char') {
-      const [, end] = getVisualSelection(rep);
+      const [, end] = getVisualSelection(visualMode, visualAnchor, visualCursor, rep);
       setRegister(getTextInRange(rep, start, end));
       setVisualMode(null);
       moveBlockCursor(editorInfo, start[0], start[1]);
@@ -387,7 +288,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
 
   if (key === 'd' || key === 'c') {
     const enterInsert = key === 'c';
-    const [start, end] = getVisualSelection(rep);
+    const [start, end] = getVisualSelection(visualMode, visualAnchor, visualCursor, rep);
 
     if (visualMode === 'char') {
       setRegister(getTextInRange(rep, start, end));
@@ -474,18 +375,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (pendingKey === 'f' || pendingKey === 'F' || pendingKey === 't' || pendingKey === 'T') {
     const direction = pendingKey;
     pendingKey = null;
-    let pos = -1;
-    if (direction === 'f') {
-      pos = findCharForward(lineText, char, key, count);
-    } else if (direction === 'F') {
-      pos = findCharBackward(lineText, char, key, count);
-    } else if (direction === 't') {
-      pos = findCharForward(lineText, char, key, count);
-      if (pos !== -1) pos = pos - 1;
-    } else if (direction === 'T') {
-      pos = findCharBackward(lineText, char, key, count);
-      if (pos !== -1) pos = pos + 1;
-    }
+    const pos = charSearchPos(direction, lineText, char, key, count);
     if (pos !== -1) moveBlockCursor(editorInfo, line, pos);
     return true;
   }
@@ -493,33 +383,15 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (pendingKey === 'df' || pendingKey === 'dF' || pendingKey === 'dt' || pendingKey === 'dT') {
     const motion = pendingKey[1];
     pendingKey = null;
-    let pos = -1;
-    if (motion === 'f' || motion === 't') {
-      pos = findCharForward(lineText, char, key, count);
-    } else {
-      pos = findCharBackward(lineText, char, key, count);
-    }
+    const searchDir = (motion === 'f' || motion === 't') ? motion : motion;
+    const pos = charSearchPos(searchDir, lineText, char, key, count);
     if (pos !== -1) {
-      let delStart = char;
-      let delEnd = char;
-      if (motion === 'f') {
-        delStart = char;
-        delEnd = pos + 1;
-      } else if (motion === 't') {
-        delStart = char;
-        delEnd = pos;
-      } else if (motion === 'F') {
-        delStart = pos;
-        delEnd = char + 1;
-      } else if (motion === 'T') {
-        delStart = pos + 1;
-        delEnd = char + 1;
-      }
-      if (delEnd > delStart) {
-        setRegister(lineText.slice(delStart, delEnd));
-        replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+      const range = charMotionRange(motion, char, pos);
+      if (range) {
+        setRegister(lineText.slice(range.start, range.end));
+        replaceRange(editorInfo, [line, range.start], [line, range.end], '');
         const newLineText = getLineText(rep, line);
-        moveBlockCursor(editorInfo, line, clampChar(delStart, newLineText));
+        moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
       }
     }
     return true;
@@ -556,47 +428,12 @@ const handleNormalKey = (rep, editorInfo, key) => {
       return true;
     }
 
-    let delStart = -1;
-    let delEnd = -1;
-
-    if (key === 'w') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
-      delStart = char;
-      delEnd = Math.min(pos, lineText.length);
-    } else if (key === 'e') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
-      delStart = char;
-      delEnd = Math.min(pos + 1, lineText.length);
-    } else if (key === 'b') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
-      delStart = pos;
-      delEnd = char;
-    } else if (key === '$') {
-      delStart = char;
-      delEnd = lineText.length;
-    } else if (key === '0') {
-      delStart = 0;
-      delEnd = char;
-    } else if (key === '^') {
-      const fnb = firstNonBlank(lineText);
-      delStart = Math.min(char, fnb);
-      delEnd = Math.max(char, fnb);
-    } else if (key === 'h') {
-      delStart = Math.max(0, char - count);
-      delEnd = char;
-    } else if (key === 'l') {
-      delStart = char;
-      delEnd = Math.min(char + count, lineText.length);
-    }
-
-    if (delEnd > delStart && delStart !== -1) {
-      setRegister(lineText.slice(delStart, delEnd));
-      replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
+    const range = motionRange(key, char, lineText, count);
+    if (range && range.end > range.start) {
+      setRegister(lineText.slice(range.start, range.end));
+      replaceRange(editorInfo, [line, range.start], [line, range.end], '');
       const newLineText = getLineText(rep, line);
-      moveBlockCursor(editorInfo, line, clampChar(delStart, newLineText));
+      moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
     }
     return true;
   }
@@ -604,30 +441,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (pendingKey === 'yf' || pendingKey === 'yF' || pendingKey === 'yt' || pendingKey === 'yT') {
     const motion = pendingKey[1];
     pendingKey = null;
-    let pos = -1;
-    if (motion === 'f' || motion === 't') {
-      pos = findCharForward(lineText, char, key, count);
-    } else {
-      pos = findCharBackward(lineText, char, key, count);
-    }
+    const pos = charSearchPos(motion, lineText, char, key, count);
     if (pos !== -1) {
-      let yankStart = char;
-      let yankEnd = char;
-      if (motion === 'f') {
-        yankStart = char;
-        yankEnd = pos + 1;
-      } else if (motion === 't') {
-        yankStart = char;
-        yankEnd = pos;
-      } else if (motion === 'F') {
-        yankStart = pos;
-        yankEnd = char + 1;
-      } else if (motion === 'T') {
-        yankStart = pos + 1;
-        yankEnd = char + 1;
-      }
-      if (yankEnd > yankStart) {
-        setRegister(lineText.slice(yankStart, yankEnd));
+      const range = charMotionRange(motion, char, pos);
+      if (range) {
+        setRegister(lineText.slice(range.start, range.end));
       }
     }
     return true;
@@ -636,32 +454,13 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (pendingKey === 'cf' || pendingKey === 'cF' || pendingKey === 'ct' || pendingKey === 'cT') {
     const motion = pendingKey[1];
     pendingKey = null;
-    let pos = -1;
-    if (motion === 'f' || motion === 't') {
-      pos = findCharForward(lineText, char, key, count);
-    } else {
-      pos = findCharBackward(lineText, char, key, count);
-    }
+    const pos = charSearchPos(motion, lineText, char, key, count);
     if (pos !== -1) {
-      let delStart = char;
-      let delEnd = char;
-      if (motion === 'f') {
-        delStart = char;
-        delEnd = pos + 1;
-      } else if (motion === 't') {
-        delStart = char;
-        delEnd = pos;
-      } else if (motion === 'F') {
-        delStart = pos;
-        delEnd = char + 1;
-      } else if (motion === 'T') {
-        delStart = pos + 1;
-        delEnd = char + 1;
-      }
-      if (delEnd > delStart) {
-        setRegister(lineText.slice(delStart, delEnd));
-        replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
-        moveCursor(editorInfo, line, delStart);
+      const range = charMotionRange(motion, char, pos);
+      if (range) {
+        setRegister(lineText.slice(range.start, range.end));
+        replaceRange(editorInfo, [line, range.start], [line, range.end], '');
+        moveCursor(editorInfo, line, range.start);
         setInsertMode(true);
       }
     }
@@ -684,46 +483,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
       return true;
     }
 
-    let delStart = -1;
-    let delEnd = -1;
-
-    if (key === 'w') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
-      delStart = char;
-      delEnd = Math.min(pos, lineText.length);
-    } else if (key === 'e') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
-      delStart = char;
-      delEnd = Math.min(pos + 1, lineText.length);
-    } else if (key === 'b') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
-      delStart = pos;
-      delEnd = char;
-    } else if (key === '$') {
-      delStart = char;
-      delEnd = lineText.length;
-    } else if (key === '0') {
-      delStart = 0;
-      delEnd = char;
-    } else if (key === '^') {
-      const fnb = firstNonBlank(lineText);
-      delStart = Math.min(char, fnb);
-      delEnd = Math.max(char, fnb);
-    } else if (key === 'h') {
-      delStart = Math.max(0, char - count);
-      delEnd = char;
-    } else if (key === 'l') {
-      delStart = char;
-      delEnd = Math.min(char + count, lineText.length);
-    }
-
-    if (delEnd > delStart && delStart !== -1) {
-      setRegister(lineText.slice(delStart, delEnd));
-      replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
-      moveCursor(editorInfo, line, delStart);
+    const range = motionRange(key, char, lineText, count);
+    if (range && range.end > range.start) {
+      setRegister(lineText.slice(range.start, range.end));
+      replaceRange(editorInfo, [line, range.start], [line, range.end], '');
+      moveCursor(editorInfo, line, range.start);
       setInsertMode(true);
     }
     return true;
@@ -748,44 +512,9 @@ const handleNormalKey = (rep, editorInfo, key) => {
       return true;
     }
 
-    let yankStart = -1;
-    let yankEnd = -1;
-
-    if (key === 'w') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
-      yankStart = char;
-      yankEnd = Math.min(pos, lineText.length);
-    } else if (key === 'e') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
-      yankStart = char;
-      yankEnd = Math.min(pos + 1, lineText.length);
-    } else if (key === 'b') {
-      let pos = char;
-      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
-      yankStart = pos;
-      yankEnd = char;
-    } else if (key === '$') {
-      yankStart = char;
-      yankEnd = lineText.length;
-    } else if (key === '0') {
-      yankStart = 0;
-      yankEnd = char;
-    } else if (key === '^') {
-      const fnb = firstNonBlank(lineText);
-      yankStart = Math.min(char, fnb);
-      yankEnd = Math.max(char, fnb);
-    } else if (key === 'h') {
-      yankStart = Math.max(0, char - count);
-      yankEnd = char;
-    } else if (key === 'l') {
-      yankStart = char;
-      yankEnd = Math.min(char + count, lineText.length);
-    }
-
-    if (yankEnd > yankStart && yankStart !== -1) {
-      setRegister(lineText.slice(yankStart, yankEnd));
+    const range = motionRange(key, char, lineText, count);
+    if (range && range.end > range.start) {
+      setRegister(lineText.slice(range.start, range.end));
     }
     return true;
   }
