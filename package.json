@@ -25,9 +25,13 @@
     "ep_etherpad-lite": ">=1.8.6"
   },
   "scripts": {
-    "test": "node --test static/js/vim-core.test.js"
+    "test": "npm run format && node --test static/js/vim-core.test.js",
+    "format": "prettier -w static/js/*"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "prettier": "^3.8.1"
   }
 }
