@@ -11,6 +11,7 @@ const {
   charSearchPos,
   motionRange,
   charMotionRange,
+  innerWordRange,
   getVisualSelection,
   paragraphForward,
   paragraphBackward,
@@ -636,6 +637,20 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (pendingKey === "ci") {
+    pendingKey = null;
+    if (key === "w") {
+      const range = innerWordRange(lineText, char);
+      if (range) {
+        setRegister(lineText.slice(range.start, range.end));
+        replaceRange(editorInfo, [line, range.start], [line, range.end], "");
+        moveCursor(editorInfo, line, range.start);
+        setInsertMode(true);
+      }
+    }
+    return true;
+  }
+
   if (pendingKey === "c") {
     pendingKey = null;
 
@@ -644,6 +659,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
       replaceRange(editorInfo, [line, 0], [line, lineText.length], "");
       moveCursor(editorInfo, line, 0);
       setInsertMode(true);
+      return true;
+    }
+
+    if (key === "i") {
+      pendingKey = "ci";
       return true;
     }
 
