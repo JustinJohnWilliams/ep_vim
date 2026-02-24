@@ -1,5 +1,30 @@
 {
-    "name": "ep_vim",
-    "version": "0.1.0",
-    "description": "vim plugin, mostly vibe coded"
+  "name": "ep_vim",
+  "version": "0.1.0",
+  "description": "Vim-mode plugin for Etherpad with modal editing, motions, and operators",
+  "author": {
+    "name": "Seth Rothschild",
+    "email": "seth.j.rothschild@gmail.com"
+  },
+  "keywords": [
+    "etherpad",
+    "plugin",
+    "ep",
+    "vim"
+  ],
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seth-Rothschild/ep_vim.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Seth-Rothschild/ep_vim/issues"
+  },
+  "homepage": "https://github.com/Seth-Rothschild/ep_vim",
+  "peerDependencies": {
+    "ep_etherpad-lite": ">=1.8.6"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
 }
