@@ -55,9 +55,12 @@ const findCharBackward = (lineText, startChar, targetChar, count) => {
 };
 
 const consumeCount = () => {
-  if (pendingKey !== null) return;
-  pendingCount = countBuffer === '' ? null : parseInt(countBuffer, 10);
-  countBuffer = '';
+  if (countBuffer !== '') {
+    pendingCount = parseInt(countBuffer, 10);
+    countBuffer = '';
+  } else if (pendingKey === null) {
+    pendingCount = null;
+  }
 };
 
 const getCount = () => pendingCount || 1;
@@ -598,6 +601,38 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (pendingKey === 'yf' || pendingKey === 'yF' || pendingKey === 'yt' || pendingKey === 'yT') {
+    const motion = pendingKey[1];
+    pendingKey = null;
+    let pos = -1;
+    if (motion === 'f' || motion === 't') {
+      pos = findCharForward(lineText, char, key, count);
+    } else {
+      pos = findCharBackward(lineText, char, key, count);
+    }
+    if (pos !== -1) {
+      let yankStart = char;
+      let yankEnd = char;
+      if (motion === 'f') {
+        yankStart = char;
+        yankEnd = pos + 1;
+      } else if (motion === 't') {
+        yankStart = char;
+        yankEnd = pos;
+      } else if (motion === 'F') {
+        yankStart = pos;
+        yankEnd = char + 1;
+      } else if (motion === 'T') {
+        yankStart = pos + 1;
+        yankEnd = char + 1;
+      }
+      if (yankEnd > yankStart) {
+        setRegister(lineText.slice(yankStart, yankEnd));
+      }
+    }
+    return true;
+  }
+
   if (pendingKey === 'cf' || pendingKey === 'cF' || pendingKey === 'ct' || pendingKey === 'cT') {
     const motion = pendingKey[1];
     pendingKey = null;
@@ -690,6 +725,67 @@ const handleNormalKey = (rep, editorInfo, key) => {
       replaceRange(editorInfo, [line, delStart], [line, delEnd], '');
       moveCursor(editorInfo, line, delStart);
       setInsertMode(true);
+    }
+    return true;
+  }
+
+  if (pendingKey === 'y') {
+    pendingKey = null;
+
+    if (key === 'y') {
+      const yankCount = Math.min(count, lineCount - line);
+      const lastYankLine = line + yankCount - 1;
+      const yankedLines = [];
+      for (let i = line; i <= lastYankLine; i++) {
+        yankedLines.push(getLineText(rep, i));
+      }
+      setRegister(yankedLines);
+      return true;
+    }
+
+    if (key === 'f' || key === 'F' || key === 't' || key === 'T') {
+      pendingKey = 'y' + key;
+      return true;
+    }
+
+    let yankStart = -1;
+    let yankEnd = -1;
+
+    if (key === 'w') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
+      yankStart = char;
+      yankEnd = Math.min(pos, lineText.length);
+    } else if (key === 'e') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
+      yankStart = char;
+      yankEnd = Math.min(pos + 1, lineText.length);
+    } else if (key === 'b') {
+      let pos = char;
+      for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
+      yankStart = pos;
+      yankEnd = char;
+    } else if (key === '$') {
+      yankStart = char;
+      yankEnd = lineText.length;
+    } else if (key === '0') {
+      yankStart = 0;
+      yankEnd = char;
+    } else if (key === '^') {
+      const fnb = firstNonBlank(lineText);
+      yankStart = Math.min(char, fnb);
+      yankEnd = Math.max(char, fnb);
+    } else if (key === 'h') {
+      yankStart = Math.max(0, char - count);
+      yankEnd = char;
+    } else if (key === 'l') {
+      yankStart = char;
+      yankEnd = Math.min(char + count, lineText.length);
+    }
+
+    if (yankEnd > yankStart && yankStart !== -1) {
+      setRegister(lineText.slice(yankStart, yankEnd));
     }
     return true;
   }
@@ -802,10 +898,15 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (key === 'p') {
     if (register !== null) {
       if (typeof register === 'string') {
-        replaceRange(editorInfo, [line, char + 1], [line, char + 1], register);
-        moveBlockCursor(editorInfo, line, char + 1);
+        const insertPos = Math.min(char + 1, lineText.length);
+        const repeated = register.repeat(count);
+        replaceRange(editorInfo, [line, insertPos], [line, insertPos], repeated);
+        moveBlockCursor(editorInfo, line, insertPos);
       } else {
-        const insertText = '\n' + register.join('\n');
+        const block = register.join('\n');
+        const parts = [];
+        for (let i = 0; i < count; i++) parts.push(block);
+        const insertText = '\n' + parts.join('\n');
         replaceRange(editorInfo, [line, lineText.length], [line, lineText.length], insertText);
         moveBlockCursor(editorInfo, line + 1, 0);
       }
@@ -816,10 +917,14 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (key === 'P') {
     if (register !== null) {
       if (typeof register === 'string') {
-        replaceRange(editorInfo, [line, char], [line, char], register);
+        const repeated = register.repeat(count);
+        replaceRange(editorInfo, [line, char], [line, char], repeated);
         moveBlockCursor(editorInfo, line, char);
       } else {
-        const insertText = register.join('\n') + '\n';
+        const block = register.join('\n');
+        const parts = [];
+        for (let i = 0; i < count; i++) parts.push(block);
+        const insertText = parts.join('\n') + '\n';
         replaceRange(editorInfo, [line, 0], [line, 0], insertText);
         moveBlockCursor(editorInfo, line, 0);
       }
@@ -875,6 +980,31 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (key === 'c') {
     pendingKey = 'c';
+    return true;
+  }
+
+  if (key === 'y') {
+    pendingKey = 'y';
+    return true;
+  }
+
+  if (key === 'Y') {
+    setRegister([lineText]);
+    return true;
+  }
+
+  if (key === 'J') {
+    const joins = Math.min(count, lineCount - 1 - line);
+    let cursorChar = lineText.length;
+    for (let i = 0; i < joins; i++) {
+      const curLineText = getLineText(rep, line);
+      const nextLineText = getLineText(rep, line + 1);
+      const trimmedNext = nextLineText.replace(/^\s+/, '');
+      const separator = curLineText.length === 0 ? '' : ' ';
+      if (i === 0) cursorChar = curLineText.length;
+      replaceRange(editorInfo, [line, curLineText.length], [line + 1, nextLineText.length], separator + trimmedNext);
+    }
+    moveBlockCursor(editorInfo, line, cursorChar);
     return true;
   }
 
