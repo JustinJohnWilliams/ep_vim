@@ -175,13 +175,13 @@ const charMotionRange = (motion, char, pos) => {
     end = pos + 1;
   } else if (motion === "t") {
     start = char;
-    end = pos;
+    end = pos + 1;
   } else if (motion === "F") {
     start = pos;
     end = char + 1;
   } else if (motion === "T") {
-    start = pos + 1;
-    end = char + 1;
+    start = pos;
+    end = char;
   }
   if (end > start) return { start, end };
   return null;

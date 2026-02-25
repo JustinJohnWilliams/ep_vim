@@ -354,6 +354,25 @@ const handleVisualKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (key === "~") {
+    const [start, end] = getVisualSelection(
+      visualMode,
+      visualAnchor,
+      visualCursor,
+      rep,
+    );
+    const text = getTextInRange(rep, start, end);
+    let toggled = "";
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      toggled += ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();
+    }
+    replaceRange(editorInfo, start, end, toggled);
+    setVisualMode(null);
+    moveBlockCursor(editorInfo, start[0], start[1]);
+    return true;
+  }
+
   if (key === "y") {
     const [start] = getVisualSelection(
       visualMode,
@@ -1056,6 +1075,17 @@ exports.postToolbarInit = (_hookName, _args) => {
     vimEnabled = !vimEnabled;
     localStorage.setItem("ep_vimEnabled", vimEnabled ? "true" : "false");
     btn.classList.toggle("vim-enabled", vimEnabled);
+  });
+};
+
+exports.postAceInit = (_hookName, { ace }) => {
+  if (!vimEnabled) return;
+  ace.callWithAce((aceTop) => {
+    const rep = aceTop.ace_getRep();
+    if (rep && rep.selStart) {
+      currentRep = rep;
+      selectRange(aceTop, rep.selStart, [rep.selStart[0], rep.selStart[1] + 1]);
+    }
   });
 };
 

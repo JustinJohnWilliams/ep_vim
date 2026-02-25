@@ -4,6 +4,7 @@
       "name": "main",
       "client_hooks": {
         "aceKeyEvent": "ep_vim/static/js/index",
+        "postAceInit": "ep_vim/static/js/index",
         "aceEditorCSS": "ep_vim/static/js/index",
         "postToolbarInit": "ep_vim/static/js/index"
       },

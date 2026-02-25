@@ -334,9 +334,9 @@ describe("charMotionRange", () => {
     assert.deepEqual(range, { start: 2, end: 6 });
   });
 
-  it("t excludes the found char", () => {
+  it("t deletes up to adjusted pos (pos from charSearchPos already adjusted)", () => {
     const range = charMotionRange("t", 2, 5);
-    assert.deepEqual(range, { start: 2, end: 5 });
+    assert.deepEqual(range, { start: 2, end: 6 });
   });
 
   it("F includes cursor char going backward", () => {
@@ -344,13 +344,13 @@ describe("charMotionRange", () => {
     assert.deepEqual(range, { start: 2, end: 6 });
   });
 
-  it("T excludes found char going backward", () => {
+  it("T deletes from adjusted pos to cursor (pos from charSearchPos already adjusted)", () => {
     const range = charMotionRange("T", 5, 2);
-    assert.deepEqual(range, { start: 3, end: 6 });
+    assert.deepEqual(range, { start: 2, end: 5 });
   });
 
-  it("returns null when end would not exceed start", () => {
-    const range = charMotionRange("t", 2, 2);
+  it("returns null for f when pos equals char", () => {
+    const range = charMotionRange("f", 2, 1);
     assert.equal(range, null);
   });
 });
