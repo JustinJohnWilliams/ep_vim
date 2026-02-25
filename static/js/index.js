@@ -136,7 +136,9 @@ const getCount = () => pendingCount || 1;
 const setRegister = (value) => {
   register = value;
   const text = Array.isArray(value) ? value.join("\n") + "\n" : value;
-  navigator.clipboard.writeText(text).catch(() => {});
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
 };
 
 const moveCursor = (editorInfo, line, char) => {
