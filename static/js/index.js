@@ -327,6 +327,11 @@ const applyMotion = (editorInfo, rep, newLine, newChar) => {
   } else {
     moveBlockCursor(editorInfo, newLine, newChar);
   }
+
+  if (editorDoc) {
+    const lineDiv = editorDoc.body.querySelectorAll("div")[newLine];
+    if (lineDiv) lineDiv.scrollIntoView({ block: "nearest" });
+  }
 };
 
 // --- Line deletion helper ---
