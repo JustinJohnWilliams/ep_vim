@@ -236,6 +236,52 @@ const innerWordRange = (lineText, char) => {
   return { start, end: end + 1 };
 };
 
+const BRACKET_PAIRS = {
+  "(": ")",
+  ")": "(",
+  "{": "}",
+  "}": "{",
+  "[": "]",
+  "]": "[",
+};
+const OPEN_BRACKETS = new Set(["(", "{", "["]);
+
+const innerQuoteRange = (lineText, char, quote) => {
+  const first = lineText.indexOf(quote);
+  if (first === -1) return null;
+  const second = lineText.indexOf(quote, first + 1);
+  if (second === -1) return null;
+  if (char < first || char > second) return null;
+  return { start: first + 1, end: second };
+};
+
+const innerBracketRange = (lineText, char, bracket) => {
+  const open = OPEN_BRACKETS.has(bracket) ? bracket : BRACKET_PAIRS[bracket];
+  const close = BRACKET_PAIRS[open];
+  let depth = 0;
+  let openPos = -1;
+  for (let i = char; i >= 0; i--) {
+    if (lineText[i] === close && i !== char) depth++;
+    if (lineText[i] === open) {
+      if (depth === 0) {
+        openPos = i;
+        break;
+      }
+      depth--;
+    }
+  }
+  if (openPos === -1) return null;
+  depth = 0;
+  for (let i = openPos + 1; i < lineText.length; i++) {
+    if (lineText[i] === open) depth++;
+    if (lineText[i] === close) {
+      if (depth === 0) return { start: openPos + 1, end: i };
+      depth--;
+    }
+  }
+  return null;
+};
+
 const getTextInRange = (rep, start, end) => {
   if (start[0] === end[0]) {
     return getLineText(rep, start[0]).slice(start[1], end[1]);
@@ -265,6 +311,8 @@ module.exports = {
   motionRange,
   charMotionRange,
   innerWordRange,
+  innerQuoteRange,
+  innerBracketRange,
   getVisualSelection,
   paragraphForward,
   paragraphBackward,

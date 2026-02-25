@@ -12,6 +12,8 @@ const {
   motionRange,
   charMotionRange,
   innerWordRange,
+  innerQuoteRange,
+  innerBracketRange,
   getVisualSelection,
   paragraphForward,
   paragraphBackward,
@@ -34,6 +36,16 @@ let editorDoc = null;
 let currentRep = null;
 let desiredColumn = null;
 let lastCharSearch = null;
+
+const QUOTE_CHARS = new Set(['"', "'"]);
+const BRACKET_CHARS = new Set(["(", ")", "{", "}", "[", "]"]);
+
+const innerTextObjectRange = (key, lineText, char) => {
+  if (key === "w") return innerWordRange(lineText, char);
+  if (QUOTE_CHARS.has(key)) return innerQuoteRange(lineText, char, key);
+  if (BRACKET_CHARS.has(key)) return innerBracketRange(lineText, char, key);
+  return null;
+};
 
 // --- Count helpers ---
 
@@ -549,14 +561,12 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (pendingKey === "di") {
     pendingKey = null;
-    if (key === "w") {
-      const range = innerWordRange(lineText, char);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-        replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-        const newLineText = getLineText(rep, line);
-        moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
-      }
+    const range = innerTextObjectRange(key, lineText, char);
+    if (range) {
+      setRegister(lineText.slice(range.start, range.end));
+      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
+      const newLineText = getLineText(rep, line);
+      moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
     }
     return true;
   }
@@ -658,14 +668,12 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (pendingKey === "ci") {
     pendingKey = null;
-    if (key === "w") {
-      const range = innerWordRange(lineText, char);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-        replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-        moveCursor(editorInfo, line, range.start);
-        setInsertMode(true);
-      }
+    const range = innerTextObjectRange(key, lineText, char);
+    if (range) {
+      setRegister(lineText.slice(range.start, range.end));
+      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
+      moveCursor(editorInfo, line, range.start);
+      setInsertMode(true);
     }
     return true;
   }
@@ -703,11 +711,9 @@ const handleNormalKey = (rep, editorInfo, key) => {
 
   if (pendingKey === "yi") {
     pendingKey = null;
-    if (key === "w") {
-      const range = innerWordRange(lineText, char);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-      }
+    const range = innerTextObjectRange(key, lineText, char);
+    if (range) {
+      setRegister(lineText.slice(range.start, range.end));
     }
     return true;
   }
