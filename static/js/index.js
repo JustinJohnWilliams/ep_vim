@@ -366,7 +366,11 @@ const handleVisualKey = (rep, editorInfo, key) => {
     if (pendingKey === "g") {
       pendingKey = null;
       desiredColumn = null;
-      visualCursor = [0, curChar];
+      if (pendingCount !== null) {
+        visualCursor = [clampLine(pendingCount - 1, rep), curChar];
+      } else {
+        visualCursor = [0, curChar];
+      }
       updateVisualSelection(editorInfo, rep);
     } else {
       pendingKey = "g";
@@ -951,7 +955,11 @@ const handleNormalKey = (rep, editorInfo, key) => {
     if (pendingKey === "g") {
       pendingKey = null;
       desiredColumn = null;
-      moveBlockCursor(editorInfo, 0, 0);
+      if (pendingCount !== null) {
+        moveBlockCursor(editorInfo, clampLine(pendingCount - 1, rep), 0);
+      } else {
+        moveBlockCursor(editorInfo, 0, 0);
+      }
     } else {
       pendingKey = "g";
     }
