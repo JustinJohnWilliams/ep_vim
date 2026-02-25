@@ -87,6 +87,29 @@ const wordEnd = (lineText, startChar) => {
   return pos;
 };
 
+const paragraphForward = (rep, startLine, count) => {
+  const totalLines = rep.lines.length();
+  let line = startLine;
+  let found = 0;
+  while (found < count && line < totalLines - 1) {
+    line++;
+    if (getLineText(rep, line).length === 0) found++;
+  }
+  if (found < count) line = totalLines - 1;
+  return line;
+};
+
+const paragraphBackward = (rep, startLine, count) => {
+  let line = startLine;
+  let found = 0;
+  while (found < count && line > 0) {
+    line--;
+    if (getLineText(rep, line).length === 0) found++;
+  }
+  if (found < count) line = 0;
+  return line;
+};
+
 const charSearchPos = (direction, lineText, char, targetChar, count) => {
   let pos = -1;
   if (direction === "f") {
@@ -214,5 +237,7 @@ module.exports = {
   motionRange,
   charMotionRange,
   getVisualSelection,
+  paragraphForward,
+  paragraphBackward,
   getTextInRange,
 };

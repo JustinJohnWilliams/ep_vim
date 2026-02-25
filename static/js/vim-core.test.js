@@ -18,6 +18,8 @@ const {
   motionRange,
   charMotionRange,
   getVisualSelection,
+  paragraphForward,
+  paragraphBackward,
   getTextInRange,
 } = require("./vim-core");
 
@@ -422,5 +424,45 @@ describe("getTextInRange", () => {
 
   it("extracts full line when range covers it", () => {
     assert.equal(getTextInRange(rep, [1, 0], [1, 5]), "world");
+  });
+});
+
+describe("paragraphForward", () => {
+  const rep = makeRep(["hello", "world", "", "foo", "bar", "", "baz"]);
+
+  it("jumps to next blank line", () => {
+    assert.equal(paragraphForward(rep, 0, 1), 2);
+  });
+
+  it("jumps multiple paragraphs with count", () => {
+    assert.equal(paragraphForward(rep, 0, 2), 5);
+  });
+
+  it("stops at last line when not enough blank lines", () => {
+    assert.equal(paragraphForward(rep, 0, 5), 6);
+  });
+
+  it("jumps from blank line to next blank line", () => {
+    assert.equal(paragraphForward(rep, 2, 1), 5);
+  });
+});
+
+describe("paragraphBackward", () => {
+  const rep = makeRep(["hello", "world", "", "foo", "bar", "", "baz"]);
+
+  it("jumps to previous blank line", () => {
+    assert.equal(paragraphBackward(rep, 6, 1), 5);
+  });
+
+  it("jumps multiple paragraphs with count", () => {
+    assert.equal(paragraphBackward(rep, 6, 2), 2);
+  });
+
+  it("stops at first line when not enough blank lines", () => {
+    assert.equal(paragraphBackward(rep, 6, 5), 0);
+  });
+
+  it("jumps from blank line to previous blank line", () => {
+    assert.equal(paragraphBackward(rep, 5, 1), 2);
   });
 });

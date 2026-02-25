@@ -12,6 +12,8 @@ const {
   motionRange,
   charMotionRange,
   getVisualSelection,
+  paragraphForward,
+  paragraphBackward,
   getTextInRange,
 } = require("./vim-core");
 
@@ -30,6 +32,7 @@ let marks = {};
 let editorDoc = null;
 let currentRep = null;
 let desiredColumn = null;
+let lastCharSearch = null;
 
 // --- Count helpers ---
 
@@ -152,6 +155,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
   ) {
     const direction = pendingKey;
     pendingKey = null;
+    lastCharSearch = { direction, target: key };
     const pos = charSearchPos(direction, lineText, curChar, key, count);
     if (pos !== -1) {
       desiredColumn = null;
@@ -258,6 +262,60 @@ const handleVisualKey = (rep, editorInfo, key) => {
     let pos = curChar;
     for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
     visualCursor = [curLine, clampChar(pos, lineText)];
+    updateVisualSelection(editorInfo, rep);
+    return true;
+  }
+
+  if (key === ";") {
+    if (lastCharSearch) {
+      const pos = charSearchPos(
+        lastCharSearch.direction,
+        lineText,
+        curChar,
+        lastCharSearch.target,
+        count,
+      );
+      if (pos !== -1) {
+        desiredColumn = null;
+        visualCursor = [curLine, pos];
+        updateVisualSelection(editorInfo, rep);
+      }
+    }
+    return true;
+  }
+
+  if (key === ",") {
+    if (lastCharSearch) {
+      const opposite = { f: "F", F: "f", t: "T", T: "t" };
+      const reverseDir = opposite[lastCharSearch.direction];
+      const pos = charSearchPos(
+        reverseDir,
+        lineText,
+        curChar,
+        lastCharSearch.target,
+        count,
+      );
+      if (pos !== -1) {
+        desiredColumn = null;
+        visualCursor = [curLine, pos];
+        updateVisualSelection(editorInfo, rep);
+      }
+    }
+    return true;
+  }
+
+  if (key === "}") {
+    desiredColumn = null;
+    const target = paragraphForward(rep, curLine, count);
+    visualCursor = [target, 0];
+    updateVisualSelection(editorInfo, rep);
+    return true;
+  }
+
+  if (key === "{") {
+    desiredColumn = null;
+    const target = paragraphBackward(rep, curLine, count);
+    visualCursor = [target, 0];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
@@ -438,6 +496,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   ) {
     const direction = pendingKey;
     pendingKey = null;
+    lastCharSearch = { direction, target: key };
     const pos = charSearchPos(direction, lineText, char, key, count);
     if (pos !== -1) {
       desiredColumn = null;
@@ -864,6 +923,36 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
+  if (key === "~") {
+    if (lineText.length > 0) {
+      const toggleCount = Math.min(count, lineText.length - char);
+      const slice = lineText.slice(char, char + toggleCount);
+      let toggled = "";
+      for (let i = 0; i < slice.length; i++) {
+        const ch = slice[i];
+        toggled +=
+          ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();
+      }
+      replaceRange(
+        editorInfo,
+        [line, char],
+        [line, char + toggleCount],
+        toggled,
+      );
+      const newChar = Math.min(char + toggleCount, lineText.length - 1);
+      moveBlockCursor(editorInfo, line, newChar);
+    }
+    return true;
+  }
+
+  if (key === "D") {
+    setRegister(lineText.slice(char));
+    replaceRange(editorInfo, [line, char], [line, lineText.length], "");
+    const newLineText = getLineText(rep, line);
+    moveBlockCursor(editorInfo, line, clampChar(char, newLineText));
+    return true;
+  }
+
   if (key === "C") {
     setRegister(lineText.slice(char));
     replaceRange(editorInfo, [line, char], [line, lineText.length], "");
@@ -890,6 +979,56 @@ const handleNormalKey = (rep, editorInfo, key) => {
     replaceRange(editorInfo, [line, 0], [line, lineText.length], "");
     moveCursor(editorInfo, line, 0);
     setInsertMode(true);
+    return true;
+  }
+
+  if (key === ";") {
+    if (lastCharSearch) {
+      const pos = charSearchPos(
+        lastCharSearch.direction,
+        lineText,
+        char,
+        lastCharSearch.target,
+        count,
+      );
+      if (pos !== -1) {
+        desiredColumn = null;
+        moveBlockCursor(editorInfo, line, pos);
+      }
+    }
+    return true;
+  }
+
+  if (key === ",") {
+    if (lastCharSearch) {
+      const opposite = { f: "F", F: "f", t: "T", T: "t" };
+      const reverseDir = opposite[lastCharSearch.direction];
+      const pos = charSearchPos(
+        reverseDir,
+        lineText,
+        char,
+        lastCharSearch.target,
+        count,
+      );
+      if (pos !== -1) {
+        desiredColumn = null;
+        moveBlockCursor(editorInfo, line, pos);
+      }
+    }
+    return true;
+  }
+
+  if (key === "}") {
+    desiredColumn = null;
+    const target = paragraphForward(rep, line, count);
+    moveBlockCursor(editorInfo, target, 0);
+    return true;
+  }
+
+  if (key === "{") {
+    desiredColumn = null;
+    const target = paragraphBackward(rep, line, count);
+    moveBlockCursor(editorInfo, target, 0);
     return true;
   }
 
