@@ -18,6 +18,9 @@ const {
   paragraphForward,
   paragraphBackward,
   getTextInRange,
+  matchingBracketPos,
+  paragraphTextRange,
+  sentenceTextRange,
 } = require("./vim-core");
 
 // --- State variables ---
@@ -46,6 +49,73 @@ const textObjectRange = (key, lineText, char, type) => {
   if (QUOTE_CHARS.has(key)) return textQuoteRange(lineText, char, key, type);
   if (BRACKET_CHARS.has(key))
     return textBracketRange(lineText, char, key, type);
+};
+
+const resolveTextObject = (key, type, line, lineText, char, rep) => {
+  if (key === "p") {
+    return paragraphTextRange(rep, line, type);
+  }
+  if (key === "s") {
+    const r = sentenceTextRange(lineText, char, type);
+    if (!r) return null;
+    return {
+      startLine: line,
+      startChar: r.start,
+      endLine: line,
+      endChar: r.end,
+    };
+  }
+  const r = textObjectRange(key, lineText, char, type);
+  if (!r) return null;
+  return { startLine: line, startChar: r.start, endLine: line, endChar: r.end };
+};
+
+const getVisibleLineRange = (rep) => {
+  const totalLines = rep.lines.length();
+  if (!editorDoc) return { top: 0, bottom: totalLines - 1 };
+  const lineDivs = editorDoc.body.querySelectorAll("div");
+  const lineCount = Math.min(lineDivs.length, totalLines);
+
+  // The iframe doesn't scroll — the outer page does. getBoundingClientRect()
+  // inside the iframe is relative to the iframe document top (not the outer
+  // viewport). We need the iframe's own position in the outer viewport to
+  // know which lines are actually visible.
+  const frameEl = editorDoc.defaultView.frameElement;
+  const iframeTop = frameEl ? frameEl.getBoundingClientRect().top : 0;
+  const outerViewportHeight = window.parent ? window.parent.innerHeight : 600;
+
+  let top = 0;
+  let bottom = lineCount - 1;
+  for (let i = 0; i < lineCount; i++) {
+    const rect = lineDivs[i].getBoundingClientRect();
+    if (iframeTop + rect.bottom > 0) {
+      top = i;
+      break;
+    }
+  }
+  for (let i = lineCount - 1; i >= 0; i--) {
+    const rect = lineDivs[i].getBoundingClientRect();
+    if (iframeTop + rect.top < outerViewportHeight) {
+      bottom = i;
+      break;
+    }
+  }
+
+  // Lines can wrap, so find the middle by pixel position rather than index.
+  const visibleTop = iframeTop + lineDivs[top].getBoundingClientRect().top;
+  const visibleBottom =
+    iframeTop + lineDivs[bottom].getBoundingClientRect().bottom;
+  const pixelMidpoint = (visibleTop + visibleBottom) / 2;
+  let mid = top;
+  for (let i = top; i <= bottom; i++) {
+    const rect = lineDivs[i].getBoundingClientRect();
+    if (iframeTop + (rect.top + rect.bottom) / 2 >= pixelMidpoint) {
+      mid = i;
+      break;
+    }
+  }
+
+  return { top, mid, bottom };
 };
 
 // --- Count helpers ---
@@ -315,6 +385,38 @@ const resolveMotion = (key, line, char, lineText, rep, count) => {
     return "pending";
   }
 
+  if (key === "%") {
+    const pos = matchingBracketPos(rep, line, char);
+    if (pos) {
+      desiredColumn = null;
+      return { line: pos.line, char: pos.char };
+    }
+    return { line, char };
+  }
+
+  if (key === "H") {
+    desiredColumn = null;
+    const { top } = getVisibleLineRange(rep);
+    const targetLine = clampLine(top + count - 1, rep);
+    const targetText = getLineText(rep, targetLine);
+    return { line: targetLine, char: firstNonBlank(targetText) };
+  }
+
+  if (key === "M") {
+    desiredColumn = null;
+    const { mid } = getVisibleLineRange(rep);
+    const targetText = getLineText(rep, mid);
+    return { line: mid, char: firstNonBlank(targetText) };
+  }
+
+  if (key === "L") {
+    desiredColumn = null;
+    const { bottom } = getVisibleLineRange(rep);
+    const targetLine = clampLine(bottom - count + 1, rep);
+    const targetText = getLineText(rep, targetLine);
+    return { line: targetLine, char: firstNonBlank(targetText) };
+  }
+
   return null;
 };
 
@@ -472,12 +574,12 @@ const handleKey = (rep, editorInfo, key) => {
       const type = pendingKey;
       pendingKey = null;
       pendingOperator = null;
-      const range = textObjectRange(key, lineText, char, type);
+      const range = resolveTextObject(key, type, line, lineText, char, rep);
       if (range) {
         applyCharOperator(
           op,
-          [line, range.start],
-          [line, range.end],
+          [range.startLine, range.startChar],
+          [range.endLine, range.endChar],
           editorInfo,
           rep,
         );
@@ -521,6 +623,26 @@ const handleKey = (rep, editorInfo, key) => {
       return true;
     }
 
+    if (key === "%") {
+      pendingOperator = null;
+      const matchPos = matchingBracketPos(rep, line, char);
+      if (matchPos) {
+        let start, end;
+        if (
+          matchPos.line > line ||
+          (matchPos.line === line && matchPos.char > char)
+        ) {
+          start = [line, char];
+          end = [matchPos.line, matchPos.char + 1];
+        } else {
+          start = [matchPos.line, matchPos.char];
+          end = [line, char + 1];
+        }
+        applyCharOperator(op, start, end, editorInfo, rep);
+      }
+      return true;
+    }
+
     pendingOperator = null;
     const range = motionRange(key, char, lineText, count);
     if (range && range.end > range.start) {
@@ -540,10 +662,10 @@ const handleKey = (rep, editorInfo, key) => {
   if (inVisual && (pendingKey === "i" || pendingKey === "a")) {
     const type = pendingKey;
     pendingKey = null;
-    const range = textObjectRange(key, lineText, char, type);
+    const range = resolveTextObject(key, type, line, lineText, char, rep);
     if (range) {
-      visualAnchor = [line, range.start];
-      visualCursor = [line, range.end];
+      visualAnchor = [range.startLine, range.startChar];
+      visualCursor = [range.endLine, range.endChar];
       setVisualMode("char");
       updateVisualSelection(editorInfo, rep);
     }

@@ -301,6 +301,132 @@ const textBracketRange = (lineText, char, bracket, type) => {
   return null;
 };
 
+const offsetToPos = (rep, offset) => {
+  const totalLines = rep.lines.length();
+  for (let i = 0; i < totalLines; i++) {
+    const lineStart = rep.lines.offsetOfIndex(i);
+    const lineLen = getLineText(rep, i).length;
+    if (offset >= lineStart && offset < lineStart + lineLen) {
+      return { line: i, char: offset - lineStart };
+    }
+  }
+  return null;
+};
+
+const matchingBracketPos = (rep, line, char) => {
+  const lineText = getLineText(rep, line);
+  let bracketChar = -1;
+  let bracket = null;
+  for (let i = char; i < lineText.length; i++) {
+    if (lineText[i] in BRACKET_PAIRS) {
+      bracketChar = i;
+      bracket = lineText[i];
+      break;
+    }
+  }
+  if (bracketChar === -1) return null;
+  const isOpen = OPEN_BRACKETS.has(bracket);
+  const match = BRACKET_PAIRS[bracket];
+  const startOffset = rep.lines.offsetOfIndex(line) + bracketChar;
+  const alltext = rep.alltext;
+  let depth = 0;
+  if (isOpen) {
+    for (let i = startOffset; i < alltext.length; i++) {
+      if (alltext[i] === bracket) depth++;
+      else if (alltext[i] === match) {
+        depth--;
+        if (depth === 0) return offsetToPos(rep, i);
+      }
+    }
+  } else {
+    for (let i = startOffset; i >= 0; i--) {
+      if (alltext[i] === bracket) depth++;
+      else if (alltext[i] === match) {
+        depth--;
+        if (depth === 0) return offsetToPos(rep, i);
+      }
+    }
+  }
+  return null;
+};
+
+const paragraphTextRange = (rep, line, type) => {
+  const totalLines = rep.lines.length();
+  const lineIsBlank = (l) => getLineText(rep, l).length === 0;
+  const onBlank = lineIsBlank(line);
+  let start = line;
+  while (start > 0 && lineIsBlank(start - 1) === onBlank) start--;
+  let end = line;
+  while (end < totalLines - 1 && lineIsBlank(end + 1) === onBlank) end++;
+  if (type === "i") {
+    return {
+      startLine: start,
+      startChar: 0,
+      endLine: end,
+      endChar: getLineText(rep, end).length,
+    };
+  }
+  if (!onBlank) {
+    let trailingEnd = end;
+    while (trailingEnd < totalLines - 1 && lineIsBlank(trailingEnd + 1))
+      trailingEnd++;
+    if (trailingEnd > end) {
+      return {
+        startLine: start,
+        startChar: 0,
+        endLine: trailingEnd,
+        endChar: getLineText(rep, trailingEnd).length,
+      };
+    }
+    let leadingStart = start;
+    while (leadingStart > 0 && lineIsBlank(leadingStart - 1)) leadingStart--;
+    return {
+      startLine: leadingStart,
+      startChar: 0,
+      endLine: end,
+      endChar: getLineText(rep, end).length,
+    };
+  }
+  let paraEnd = end;
+  while (paraEnd < totalLines - 1 && !lineIsBlank(paraEnd + 1)) paraEnd++;
+  return {
+    startLine: start,
+    startChar: 0,
+    endLine: paraEnd,
+    endChar: getLineText(rep, paraEnd).length,
+  };
+};
+
+const sentenceTextRange = (lineText, char, type) => {
+  const isTerminator = (ch) => ch === "." || ch === "!" || ch === "?";
+  let start = 0;
+  for (let i = char - 1; i >= 0; i--) {
+    if (isTerminator(lineText[i])) {
+      let j = i + 1;
+      while (j < lineText.length && lineText[j] === " ") j++;
+      start = j;
+      break;
+    }
+  }
+  let end = lineText.length;
+  for (let i = char; i < lineText.length; i++) {
+    if (isTerminator(lineText[i])) {
+      end = i + 1;
+      break;
+    }
+  }
+  if (type === "i") {
+    let s = start;
+    let e = end;
+    while (s < e && lineText[s] === " ") s++;
+    while (e > s && lineText[e - 1] === " ") e--;
+    return { start: s, end: e };
+  }
+  let e = end;
+  while (e < lineText.length && lineText[e] === " ") e++;
+  return { start, end: e };
+};
+
 const getTextInRange = (rep, start, end, type) => {
   if (start[0] === end[0]) {
     return getLineText(rep, start[0]).slice(start[1], end[1]);
@@ -336,4 +462,7 @@ module.exports = {
   paragraphForward,
   paragraphBackward,
   getTextInRange,
+  matchingBracketPos,
+  paragraphTextRange,
+  sentenceTextRange,
 };
