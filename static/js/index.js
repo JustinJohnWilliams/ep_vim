@@ -28,6 +28,7 @@ let visualMode = null;
 let visualAnchor = null;
 let visualCursor = null;
 let pendingKey = null;
+let pendingOperator = null;
 let pendingCount = null;
 let countBuffer = "";
 let register = null;
@@ -41,7 +42,7 @@ const QUOTE_CHARS = new Set(['"', "'"]);
 const BRACKET_CHARS = new Set(["(", ")", "{", "}", "[", "]"]);
 
 const textObjectRange = (key, lineText, char, type) => {
-  if (key === "w") return textWordRange(lineText, char);
+  if (key === "w") return textWordRange(lineText, char, type);
   if (QUOTE_CHARS.has(key)) return textQuoteRange(lineText, char, key, type);
   if (BRACKET_CHARS.has(key))
     return textBracketRange(lineText, char, key, type);
@@ -53,7 +54,7 @@ const consumeCount = () => {
   if (countBuffer !== "") {
     pendingCount = parseInt(countBuffer, 10);
     countBuffer = "";
-  } else if (pendingKey === null) {
+  } else if (pendingKey === null && pendingOperator === null) {
     pendingCount = null;
   }
 };
@@ -129,8 +130,6 @@ const setVisualMode = (value) => {
   }
 };
 
-// --- Visual mode helpers ---
-
 const updateVisualSelection = (editorInfo, rep) => {
   const [start, end] = getVisualSelection(
     visualMode,
@@ -141,42 +140,9 @@ const updateVisualSelection = (editorInfo, rep) => {
   selectRange(editorInfo, start, end);
 };
 
-// --- Visual mode key handler ---
+// --- Motion resolution (shared between normal and visual) ---
 
-const handleVisualKey = (rep, editorInfo, key) => {
-  const curLine = visualCursor[0];
-  const curChar = visualCursor[1];
-  const lineText = getLineText(rep, curLine);
-
-  if (key === "i" || key === "a") {
-    pendingKey = key;
-    return true;
-  }
-
-  if (pendingKey === "i" || pendingKey === "a") {
-    const range = textObjectRange(key, lineText, curChar, pendingKey);
-    pendingKey = null;
-    if (range) {
-      visualAnchor = [curLine, range.start];
-      visualCursor = [curLine, range.end];
-      setVisualMode("char");
-      updateVisualSelection(editorInfo, rep);
-    }
-    return true;
-  }
-
-  if (key >= "1" && key <= "9") {
-    countBuffer += key;
-    return true;
-  }
-  if (key === "0" && countBuffer !== "") {
-    countBuffer += key;
-    return true;
-  }
-
-  consumeCount();
-  const count = getCount();
-
+const resolveMotion = (key, line, char, lineText, rep, count) => {
   if (
     pendingKey === "f" ||
     pendingKey === "F" ||
@@ -186,13 +152,12 @@ const handleVisualKey = (rep, editorInfo, key) => {
     const direction = pendingKey;
     pendingKey = null;
     lastCharSearch = { direction, target: key };
-    const pos = charSearchPos(direction, lineText, curChar, key, count);
+    const pos = charSearchPos(direction, lineText, char, key, count);
     if (pos !== -1) {
       desiredColumn = null;
-      visualCursor = [curLine, pos];
-      updateVisualSelection(editorInfo, rep);
+      return { line, char: pos };
     }
-    return true;
+    return { line, char };
   }
 
   if (pendingKey === "'" || pendingKey === "`") {
@@ -203,97 +168,100 @@ const handleVisualKey = (rep, editorInfo, key) => {
       desiredColumn = null;
       if (jumpType === "'") {
         const targetLineText = getLineText(rep, markLine);
-        visualCursor = [markLine, firstNonBlank(targetLineText)];
-      } else {
-        visualCursor = [markLine, markChar];
+        return { line: markLine, char: firstNonBlank(targetLineText) };
       }
-      updateVisualSelection(editorInfo, rep);
+      return { line: markLine, char: markChar };
     }
-    return true;
+    return { line, char };
+  }
+
+  if (pendingKey === "g") {
+    pendingKey = null;
+    if (key === "g") {
+      desiredColumn = null;
+      if (pendingCount !== null) {
+        return { line: clampLine(pendingCount - 1, rep), char: 0 };
+      }
+      return { line: 0, char: 0 };
+    }
   }
 
   if (key === "h") {
     desiredColumn = null;
-    visualCursor = [curLine, Math.max(0, curChar - count)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line, char: Math.max(0, char - count) };
   }
 
   if (key === "l") {
     desiredColumn = null;
-    visualCursor = [curLine, clampChar(curChar + count, lineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line, char: clampChar(char + count, lineText) };
   }
 
   if (key === "j") {
-    if (desiredColumn === null) {
-      desiredColumn = curChar;
-    }
-    const newLine = clampLine(curLine + count, rep);
+    if (desiredColumn === null) desiredColumn = char;
+    const newLine = clampLine(line + count, rep);
     const newLineText = getLineText(rep, newLine);
-    visualCursor = [newLine, clampChar(desiredColumn, newLineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line: newLine, char: clampChar(desiredColumn, newLineText) };
   }
 
   if (key === "k") {
-    if (desiredColumn === null) {
-      desiredColumn = curChar;
-    }
-    const newLine = clampLine(curLine - count, rep);
+    if (desiredColumn === null) desiredColumn = char;
+    const newLine = clampLine(line - count, rep);
     const newLineText = getLineText(rep, newLine);
-    visualCursor = [newLine, clampChar(desiredColumn, newLineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "0") {
-    desiredColumn = null;
-    visualCursor = [curLine, 0];
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "$") {
-    desiredColumn = null;
-    visualCursor = [curLine, clampChar(lineText.length - 1, lineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "^") {
-    desiredColumn = null;
-    visualCursor = [curLine, firstNonBlank(lineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line: newLine, char: clampChar(desiredColumn, newLineText) };
   }
 
   if (key === "w") {
     desiredColumn = null;
-    let pos = curChar;
+    let pos = char;
     for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
-    visualCursor = [curLine, clampChar(pos, lineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line, char: clampChar(pos, lineText) };
   }
 
   if (key === "b") {
     desiredColumn = null;
-    let pos = curChar;
+    let pos = char;
     for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
-    visualCursor = [curLine, pos];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line, char: pos };
   }
 
   if (key === "e") {
     desiredColumn = null;
-    let pos = curChar;
+    let pos = char;
     for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
-    visualCursor = [curLine, clampChar(pos, lineText)];
-    updateVisualSelection(editorInfo, rep);
-    return true;
+    return { line, char: clampChar(pos, lineText) };
+  }
+
+  if (key === "0") {
+    desiredColumn = null;
+    return { line, char: 0 };
+  }
+
+  if (key === "$") {
+    desiredColumn = null;
+    return { line, char: clampChar(lineText.length - 1, lineText) };
+  }
+
+  if (key === "^") {
+    desiredColumn = null;
+    return { line, char: firstNonBlank(lineText) };
+  }
+
+  if (key === "}") {
+    desiredColumn = null;
+    return { line: paragraphForward(rep, line, count), char: 0 };
+  }
+
+  if (key === "{") {
+    desiredColumn = null;
+    return { line: paragraphBackward(rep, line, count), char: 0 };
+  }
+
+  if (key === "G") {
+    desiredColumn = null;
+    if (pendingCount !== null) {
+      return { line: clampLine(pendingCount - 1, rep), char: 0 };
+    }
+    return { line: rep.lines.length() - 1, char: 0 };
   }
 
   if (key === ";") {
@@ -301,17 +269,16 @@ const handleVisualKey = (rep, editorInfo, key) => {
       const pos = charSearchPos(
         lastCharSearch.direction,
         lineText,
-        curChar,
+        char,
         lastCharSearch.target,
         count,
       );
       if (pos !== -1) {
         desiredColumn = null;
-        visualCursor = [curLine, pos];
-        updateVisualSelection(editorInfo, rep);
+        return { line, char: pos };
       }
     }
-    return true;
+    return { line, char };
   }
 
   if (key === ",") {
@@ -321,203 +288,134 @@ const handleVisualKey = (rep, editorInfo, key) => {
       const pos = charSearchPos(
         reverseDir,
         lineText,
-        curChar,
+        char,
         lastCharSearch.target,
         count,
       );
       if (pos !== -1) {
         desiredColumn = null;
-        visualCursor = [curLine, pos];
-        updateVisualSelection(editorInfo, rep);
+        return { line, char: pos };
       }
     }
-    return true;
-  }
-
-  if (key === "}") {
-    desiredColumn = null;
-    const target = paragraphForward(rep, curLine, count);
-    visualCursor = [target, 0];
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "{") {
-    desiredColumn = null;
-    const target = paragraphBackward(rep, curLine, count);
-    visualCursor = [target, 0];
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "G") {
-    pendingKey = null;
-    desiredColumn = null;
-    if (pendingCount !== null) {
-      visualCursor = [clampLine(pendingCount - 1, rep), curChar];
-    } else {
-      visualCursor = [rep.lines.length() - 1, curChar];
-    }
-    updateVisualSelection(editorInfo, rep);
-    return true;
-  }
-
-  if (key === "g") {
-    if (pendingKey === "g") {
-      pendingKey = null;
-      desiredColumn = null;
-      if (pendingCount !== null) {
-        visualCursor = [clampLine(pendingCount - 1, rep), curChar];
-      } else {
-        visualCursor = [0, curChar];
-      }
-      updateVisualSelection(editorInfo, rep);
-    } else {
-      pendingKey = "g";
-    }
-    return true;
+    return { line, char };
   }
 
   if (key === "f" || key === "F" || key === "t" || key === "T") {
     pendingKey = key;
-    return true;
+    return "pending";
   }
 
   if (key === "'" || key === "`") {
     pendingKey = key;
-    return true;
+    return "pending";
   }
 
-  if (key === "~") {
-    const [start, end] = getVisualSelection(
-      visualMode,
-      visualAnchor,
-      visualCursor,
-      rep,
-    );
-    const text = getTextInRange(rep, start, end);
-    let toggled = "";
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      toggled += ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();
-    }
-    replaceRange(editorInfo, start, end, toggled);
-    setVisualMode(null);
-    moveBlockCursor(editorInfo, start[0], start[1]);
-    return true;
+  if (key === "g") {
+    pendingKey = "g";
+    return "pending";
   }
 
-  if (key === "y") {
-    const [start] = getVisualSelection(
-      visualMode,
-      visualAnchor,
-      visualCursor,
-      rep,
-    );
-
-    if (visualMode === "char") {
-      const [, end] = getVisualSelection(
-        visualMode,
-        visualAnchor,
-        visualCursor,
-        rep,
-      );
-      setRegister(getTextInRange(rep, start, end));
-      setVisualMode(null);
-      moveBlockCursor(editorInfo, start[0], start[1]);
-      return true;
-    }
-
-    const topLine = start[0];
-    const bottomLine = Math.max(visualAnchor[0], visualCursor[0]);
-    const lines = [];
-    for (let i = topLine; i <= bottomLine; i++) {
-      lines.push(getLineText(rep, i));
-    }
-    setRegister(lines);
-    setVisualMode(null);
-    moveBlockCursor(editorInfo, topLine, 0);
-    return true;
-  }
-
-  if (key === "d" || key === "c") {
-    const enterInsert = key === "c";
-    const [start, end] = getVisualSelection(
-      visualMode,
-      visualAnchor,
-      visualCursor,
-      rep,
-    );
-
-    if (visualMode === "char") {
-      setRegister(getTextInRange(rep, start, end));
-      replaceRange(editorInfo, start, end, "");
-      if (enterInsert) {
-        moveCursor(editorInfo, start[0], start[1]);
-        setVisualMode(null);
-        setInsertMode(true);
-      } else {
-        setVisualMode(null);
-        moveBlockCursor(editorInfo, start[0], start[1]);
-      }
-      return true;
-    }
-
-    const topLine = start[0];
-    const bottomLine = Math.max(visualAnchor[0], visualCursor[0]);
-    const totalLines = rep.lines.length();
-    const lines = [];
-    for (let i = topLine; i <= bottomLine; i++) {
-      lines.push(getLineText(rep, i));
-    }
-    setRegister(lines);
-
-    if (enterInsert) {
-      for (let i = topLine; i <= bottomLine; i++) {
-        const text = getLineText(rep, i);
-        replaceRange(editorInfo, [topLine, 0], [topLine, text.length], "");
-      }
-      moveCursor(editorInfo, topLine, 0);
-      setVisualMode(null);
-      setInsertMode(true);
-      return true;
-    }
-
-    if (bottomLine === totalLines - 1 && topLine > 0) {
-      const prevLineLen = getLineText(rep, topLine - 1).length;
-      replaceRange(
-        editorInfo,
-        [topLine - 1, prevLineLen],
-        [bottomLine, getLineText(rep, bottomLine).length],
-        "",
-      );
-      moveBlockCursor(editorInfo, topLine - 1, 0);
-    } else if (bottomLine < totalLines - 1) {
-      replaceRange(editorInfo, [topLine, 0], [bottomLine + 1, 0], "");
-      moveBlockCursor(editorInfo, topLine, 0);
-    } else {
-      replaceRange(
-        editorInfo,
-        [0, 0],
-        [bottomLine, getLineText(rep, bottomLine).length],
-        "",
-      );
-      moveBlockCursor(editorInfo, 0, 0);
-    }
-
-    setVisualMode(null);
-    return true;
-  }
-
-  pendingKey = null;
-  return false;
+  return null;
 };
 
-// --- Normal mode key handler ---
+// --- Apply motion (mode-aware cursor placement) ---
 
-const handleNormalKey = (rep, editorInfo, key) => {
-  const [line, char] = rep.selStart;
-  const lineCount = rep.lines.length();
+const applyMotion = (editorInfo, rep, newLine, newChar) => {
+  if (visualMode !== null) {
+    visualCursor = [newLine, newChar];
+    updateVisualSelection(editorInfo, rep);
+  } else {
+    moveBlockCursor(editorInfo, newLine, newChar);
+  }
+};
+
+// --- Line deletion helper ---
+
+const deleteLines = (editorInfo, rep, topLine, bottomLine) => {
+  const totalLines = rep.lines.length();
+  if (bottomLine === totalLines - 1 && topLine > 0) {
+    const prevLineLen = getLineText(rep, topLine - 1).length;
+    replaceRange(
+      editorInfo,
+      [topLine - 1, prevLineLen],
+      [bottomLine, getLineText(rep, bottomLine).length],
+      "",
+    );
+    return topLine - 1;
+  }
+  if (bottomLine < totalLines - 1) {
+    replaceRange(editorInfo, [topLine, 0], [bottomLine + 1, 0], "");
+    return topLine;
+  }
+  replaceRange(
+    editorInfo,
+    [0, 0],
+    [bottomLine, getLineText(rep, bottomLine).length],
+    "",
+  );
+  return 0;
+};
+
+// --- Operator application ---
+
+const applyCharOperator = (operator, start, end, editorInfo, rep) => {
+  if (start[0] === end[0]) {
+    const lineText = getLineText(rep, start[0]);
+    setRegister(lineText.slice(start[1], end[1]));
+  } else {
+    setRegister(getTextInRange(rep, start, end));
+  }
+  if (operator === "y") {
+    moveBlockCursor(editorInfo, start[0], start[1]);
+    return;
+  }
+  replaceRange(editorInfo, start, end, "");
+  if (operator === "c") {
+    moveCursor(editorInfo, start[0], start[1]);
+    setInsertMode(true);
+  } else {
+    const newLineText = getLineText(rep, start[0]);
+    moveBlockCursor(editorInfo, start[0], clampChar(start[1], newLineText));
+  }
+};
+
+const applyLineOperator = (
+  operator,
+  topLine,
+  bottomLine,
+  editorInfo,
+  rep,
+  char,
+) => {
+  const lines = [];
+  for (let i = topLine; i <= bottomLine; i++) {
+    lines.push(getLineText(rep, i));
+  }
+  setRegister(lines);
+  if (operator === "y") {
+    moveBlockCursor(editorInfo, topLine, 0);
+    return;
+  }
+  if (operator === "c") {
+    for (let i = topLine; i <= bottomLine; i++) {
+      const text = getLineText(rep, i);
+      replaceRange(editorInfo, [topLine, 0], [topLine, text.length], "");
+    }
+    moveCursor(editorInfo, topLine, 0);
+    setInsertMode(true);
+    return;
+  }
+  const cursorLine = deleteLines(editorInfo, rep, topLine, bottomLine);
+  const newLineText = getLineText(rep, cursorLine);
+  moveBlockCursor(editorInfo, cursorLine, clampChar(char, newLineText));
+};
+
+// --- Unified key handler ---
+
+const handleKey = (rep, editorInfo, key) => {
+  const inVisual = visualMode !== null;
+  const line = inVisual ? visualCursor[0] : rep.selStart[0];
+  const char = inVisual ? visualCursor[1] : rep.selStart[1];
   const lineText = getLineText(rep, line);
 
   if (key >= "1" && key <= "9") {
@@ -532,240 +430,13 @@ const handleNormalKey = (rep, editorInfo, key) => {
   consumeCount();
   const count = getCount();
 
+  // --- Normal-only pending states: r + char, m + letter ---
+
   if (pendingKey === "r") {
     pendingKey = null;
     if (lineText.length > 0) {
       replaceRange(editorInfo, [line, char], [line, char + 1], key);
       moveBlockCursor(editorInfo, line, char);
-    }
-    return true;
-  }
-
-  if (
-    pendingKey === "f" ||
-    pendingKey === "F" ||
-    pendingKey === "t" ||
-    pendingKey === "T"
-  ) {
-    const direction = pendingKey;
-    pendingKey = null;
-    lastCharSearch = { direction, target: key };
-    const pos = charSearchPos(direction, lineText, char, key, count);
-    if (pos !== -1) {
-      desiredColumn = null;
-      moveBlockCursor(editorInfo, line, pos);
-    }
-    return true;
-  }
-
-  if (
-    pendingKey === "df" ||
-    pendingKey === "dF" ||
-    pendingKey === "dt" ||
-    pendingKey === "dT"
-  ) {
-    const motion = pendingKey[1];
-    pendingKey = null;
-    const searchDir = motion === "f" || motion === "t" ? motion : motion;
-    const pos = charSearchPos(searchDir, lineText, char, key, count);
-    if (pos !== -1) {
-      const range = charMotionRange(motion, char, pos);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-        replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-        const newLineText = getLineText(rep, line);
-        moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
-      }
-    }
-    return true;
-  }
-
-  if (pendingKey === "di" || pendingKey === "da") {
-    const range = textObjectRange(key, lineText, char, pendingKey[1]);
-    pendingKey = null;
-    if (range) {
-      setRegister(lineText.slice(range.start, range.end));
-      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-      const newLineText = getLineText(rep, line);
-      moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
-    }
-    return true;
-  }
-
-  if (pendingKey === "d") {
-    pendingKey = null;
-
-    if (key === "d") {
-      const deleteCount = Math.min(count, lineCount - line);
-      const lastDeleteLine = line + deleteCount - 1;
-      const deletedLines = [];
-      for (let i = line; i <= lastDeleteLine; i++) {
-        deletedLines.push(getLineText(rep, i));
-      }
-      setRegister(deletedLines);
-      if (lastDeleteLine === lineCount - 1 && line > 0) {
-        const prevLineText = getLineText(rep, line - 1);
-        replaceRange(
-          editorInfo,
-          [line - 1, prevLineText.length],
-          [lastDeleteLine, getLineText(rep, lastDeleteLine).length],
-          "",
-        );
-        moveBlockCursor(editorInfo, line - 1, clampChar(char, prevLineText));
-      } else if (lineCount > deleteCount) {
-        replaceRange(editorInfo, [line, 0], [lastDeleteLine + 1, 0], "");
-        const newLineText = getLineText(rep, line);
-        moveBlockCursor(editorInfo, line, clampChar(char, newLineText));
-      } else {
-        replaceRange(
-          editorInfo,
-          [0, 0],
-          [lastDeleteLine, getLineText(rep, lastDeleteLine).length],
-          "",
-        );
-        moveBlockCursor(editorInfo, 0, 0);
-      }
-      return true;
-    }
-
-    if (key === "i") {
-      pendingKey = "di";
-      return true;
-    }
-
-    if (key === "f" || key === "F" || key === "t" || key === "T") {
-      pendingKey = "d" + key;
-      return true;
-    }
-
-    const range = motionRange(key, char, lineText, count);
-    if (range && range.end > range.start) {
-      setRegister(lineText.slice(range.start, range.end));
-      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-      const newLineText = getLineText(rep, line);
-      moveBlockCursor(editorInfo, line, clampChar(range.start, newLineText));
-    }
-    return true;
-  }
-
-  if (
-    pendingKey === "yf" ||
-    pendingKey === "yF" ||
-    pendingKey === "yt" ||
-    pendingKey === "yT"
-  ) {
-    const motion = pendingKey[1];
-    pendingKey = null;
-    const pos = charSearchPos(motion, lineText, char, key, count);
-    if (pos !== -1) {
-      const range = charMotionRange(motion, char, pos);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-      }
-    }
-    return true;
-  }
-
-  if (
-    pendingKey === "cf" ||
-    pendingKey === "cF" ||
-    pendingKey === "ct" ||
-    pendingKey === "cT"
-  ) {
-    const motion = pendingKey[1];
-    pendingKey = null;
-    const pos = charSearchPos(motion, lineText, char, key, count);
-    if (pos !== -1) {
-      const range = charMotionRange(motion, char, pos);
-      if (range) {
-        setRegister(lineText.slice(range.start, range.end));
-        replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-        moveCursor(editorInfo, line, range.start);
-        setInsertMode(true);
-      }
-    }
-    return true;
-  }
-
-  if (pendingKey === "ci" || pendingKey === "ca") {
-    const range = textObjectRange(key, lineText, char, pendingKey[1]);
-    pendingKey = null;
-    if (range) {
-      setRegister(lineText.slice(range.start, range.end));
-      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-      moveCursor(editorInfo, line, range.start);
-      setInsertMode(true);
-    }
-    return true;
-  }
-
-  if (pendingKey === "c") {
-    pendingKey = null;
-
-    if (key === "c") {
-      setRegister(lineText);
-      replaceRange(editorInfo, [line, 0], [line, lineText.length], "");
-      moveCursor(editorInfo, line, 0);
-      setInsertMode(true);
-      return true;
-    }
-
-    if (key === "i") {
-      pendingKey = "ci";
-      return true;
-    }
-
-    if (key === "f" || key === "F" || key === "t" || key === "T") {
-      pendingKey = "c" + key;
-      return true;
-    }
-
-    const range = motionRange(key, char, lineText, count);
-    if (range && range.end > range.start) {
-      setRegister(lineText.slice(range.start, range.end));
-      replaceRange(editorInfo, [line, range.start], [line, range.end], "");
-      moveCursor(editorInfo, line, range.start);
-      setInsertMode(true);
-    }
-    return true;
-  }
-
-  if (pendingKey === "yi") {
-    const range = textObjectRange(key, lineText, char, pendingKey[1]);
-    pendingKey = null;
-    if (range) {
-      setRegister(lineText.slice(range.start, range.end));
-    }
-    return true;
-  }
-
-  if (pendingKey === "y") {
-    pendingKey = null;
-
-    if (key === "y") {
-      const yankCount = Math.min(count, lineCount - line);
-      const lastYankLine = line + yankCount - 1;
-      const yankedLines = [];
-      for (let i = line; i <= lastYankLine; i++) {
-        yankedLines.push(getLineText(rep, i));
-      }
-      setRegister(yankedLines);
-      return true;
-    }
-
-    if (key === "i") {
-      pendingKey = "yi";
-      return true;
-    }
-
-    if (key === "f" || key === "F" || key === "t" || key === "T") {
-      pendingKey = "y" + key;
-      return true;
-    }
-
-    const range = motionRange(key, char, lineText, count);
-    if (range && range.end > range.start) {
-      setRegister(lineText.slice(range.start, range.end));
     }
     return true;
   }
@@ -778,69 +449,182 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (pendingKey === "'" || pendingKey === "`") {
-    const jumpType = pendingKey;
-    pendingKey = null;
-    if (key >= "a" && key <= "z" && marks[key]) {
-      const [markLine, markChar] = marks[key];
-      desiredColumn = null;
-      if (jumpType === "'") {
-        const targetLineText = getLineText(rep, markLine);
-        moveBlockCursor(editorInfo, markLine, firstNonBlank(targetLineText));
-      } else {
-        moveBlockCursor(editorInfo, markLine, markChar);
+  // --- Operator-pending: resolve target ---
+
+  if (pendingOperator !== null) {
+    const op = pendingOperator;
+
+    if (key === op) {
+      pendingOperator = null;
+      const lineCount = rep.lines.length();
+      const opCount = Math.min(count, lineCount - line);
+      const lastLine = line + opCount - 1;
+      applyLineOperator(op, line, lastLine, editorInfo, rep, char);
+      return true;
+    }
+
+    if (pendingKey === "i" || pendingKey === "a") {
+      const type = pendingKey;
+      pendingKey = null;
+      pendingOperator = null;
+      const range = textObjectRange(key, lineText, char, type);
+      if (range) {
+        applyCharOperator(
+          op,
+          [line, range.start],
+          [line, range.end],
+          editorInfo,
+          rep,
+        );
       }
+      return true;
+    }
+
+    if (
+      pendingKey === "f" ||
+      pendingKey === "F" ||
+      pendingKey === "t" ||
+      pendingKey === "T"
+    ) {
+      const direction = pendingKey;
+      pendingKey = null;
+      pendingOperator = null;
+      lastCharSearch = { direction, target: key };
+      const pos = charSearchPos(direction, lineText, char, key, count);
+      if (pos !== -1) {
+        const range = charMotionRange(direction, char, pos);
+        if (range) {
+          applyCharOperator(
+            op,
+            [line, range.start],
+            [line, range.end],
+            editorInfo,
+            rep,
+          );
+        }
+      }
+      return true;
+    }
+
+    if (key === "i" || key === "a") {
+      pendingKey = key;
+      return true;
+    }
+
+    if (key === "f" || key === "F" || key === "t" || key === "T") {
+      pendingKey = key;
+      return true;
+    }
+
+    pendingOperator = null;
+    const range = motionRange(key, char, lineText, count);
+    if (range && range.end > range.start) {
+      applyCharOperator(
+        op,
+        [line, range.start],
+        [line, range.end],
+        editorInfo,
+        rep,
+      );
     }
     return true;
   }
 
-  if (key === "h") {
-    desiredColumn = null;
-    moveBlockCursor(editorInfo, line, Math.max(0, char - count));
-    return true;
-  }
+  // --- Text object in visual mode (i/a + object key) ---
 
-  if (key === "l") {
-    desiredColumn = null;
-    moveBlockCursor(editorInfo, line, clampChar(char + count, lineText));
-    return true;
-  }
-
-  if (key === "k") {
-    if (desiredColumn === null) {
-      desiredColumn = char;
+  if (inVisual && (pendingKey === "i" || pendingKey === "a")) {
+    const type = pendingKey;
+    pendingKey = null;
+    const range = textObjectRange(key, lineText, char, type);
+    if (range) {
+      visualAnchor = [line, range.start];
+      visualCursor = [line, range.end];
+      setVisualMode("char");
+      updateVisualSelection(editorInfo, rep);
     }
-    const newLine = clampLine(line - count, rep);
-    const newLineText = getLineText(rep, newLine);
-    moveBlockCursor(editorInfo, newLine, clampChar(desiredColumn, newLineText));
     return true;
   }
 
-  if (key === "j") {
-    if (desiredColumn === null) {
-      desiredColumn = char;
+  // --- Motions (shared between normal and visual) ---
+
+  const motion = resolveMotion(key, line, char, lineText, rep, count);
+  if (motion === "pending") return true;
+  if (motion) {
+    applyMotion(editorInfo, rep, motion.line, motion.char);
+    return true;
+  }
+
+  // --- Operators (d/c/y) ---
+
+  if (key === "d" || key === "c" || key === "y") {
+    if (inVisual) {
+      if (visualMode === "char") {
+        const [start, end] = getVisualSelection(
+          visualMode,
+          visualAnchor,
+          visualCursor,
+          rep,
+        );
+        setVisualMode(null);
+        applyCharOperator(key, start, end, editorInfo, rep);
+      } else {
+        const topLine = Math.min(visualAnchor[0], visualCursor[0]);
+        const bottomLine = Math.max(visualAnchor[0], visualCursor[0]);
+        setVisualMode(null);
+        applyLineOperator(key, topLine, bottomLine, editorInfo, rep, 0);
+      }
+      return true;
     }
-    const newLine = clampLine(line + count, rep);
-    const newLineText = getLineText(rep, newLine);
-    moveBlockCursor(editorInfo, newLine, clampChar(desiredColumn, newLineText));
+    pendingOperator = key;
     return true;
   }
 
-  if (key === "0") {
-    desiredColumn = null;
-    moveBlockCursor(editorInfo, line, 0);
+  // --- Visual-mode specific ---
+
+  if (inVisual) {
+    if (key === "i" || key === "a") {
+      pendingKey = key;
+      return true;
+    }
+
+    if (key === "~") {
+      const [start, end] = getVisualSelection(
+        visualMode,
+        visualAnchor,
+        visualCursor,
+        rep,
+      );
+      const text = getTextInRange(rep, start, end);
+      let toggled = "";
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        toggled +=
+          ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();
+      }
+      replaceRange(editorInfo, start, end, toggled);
+      setVisualMode(null);
+      moveBlockCursor(editorInfo, start[0], start[1]);
+      return true;
+    }
+
+    pendingKey = null;
+    return false;
+  }
+
+  // --- Normal-mode only commands ---
+
+  if (key === "Y") {
+    setRegister([lineText]);
     return true;
   }
 
-  if (key === "$") {
-    desiredColumn = null;
-    moveBlockCursor(editorInfo, line, clampChar(lineText.length - 1, lineText));
+  if (key === "r") {
+    if (lineText.length > 0) pendingKey = "r";
     return true;
   }
 
-  if (key === "^") {
-    desiredColumn = null;
-    moveBlockCursor(editorInfo, line, firstNonBlank(lineText));
+  if (key === "m") {
+    pendingKey = "m";
     return true;
   }
 
@@ -851,22 +635,6 @@ const handleNormalKey = (rep, editorInfo, key) => {
       const newLineText = getLineText(rep, line);
       moveBlockCursor(editorInfo, line, clampChar(char, newLineText));
     }
-    return true;
-  }
-
-  if (key === "w") {
-    desiredColumn = null;
-    let pos = char;
-    for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
-    moveBlockCursor(editorInfo, line, clampChar(pos, lineText));
-    return true;
-  }
-
-  if (key === "b") {
-    desiredColumn = null;
-    let pos = char;
-    for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
-    moveBlockCursor(editorInfo, line, pos);
     return true;
   }
 
@@ -941,74 +709,8 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (key === "G") {
-    desiredColumn = null;
-    if (pendingCount !== null) {
-      moveBlockCursor(editorInfo, clampLine(pendingCount - 1, rep), 0);
-    } else {
-      moveBlockCursor(editorInfo, lineCount - 1, 0);
-    }
-    return true;
-  }
-
-  if (key === "g") {
-    if (pendingKey === "g") {
-      pendingKey = null;
-      desiredColumn = null;
-      if (pendingCount !== null) {
-        moveBlockCursor(editorInfo, clampLine(pendingCount - 1, rep), 0);
-      } else {
-        moveBlockCursor(editorInfo, 0, 0);
-      }
-    } else {
-      pendingKey = "g";
-    }
-    return true;
-  }
-
-  if (key === "r") {
-    if (lineText.length > 0) {
-      pendingKey = "r";
-    }
-    return true;
-  }
-
-  if (key === "f" || key === "F" || key === "t" || key === "T") {
-    pendingKey = key;
-    return true;
-  }
-
-  if (key === "m") {
-    pendingKey = "m";
-    return true;
-  }
-
-  if (key === "'" || key === "`") {
-    pendingKey = key;
-    return true;
-  }
-
-  if (key === "d") {
-    pendingKey = "d";
-    return true;
-  }
-
-  if (key === "c") {
-    pendingKey = "c";
-    return true;
-  }
-
-  if (key === "y") {
-    pendingKey = "y";
-    return true;
-  }
-
-  if (key === "Y") {
-    setRegister([lineText]);
-    return true;
-  }
-
   if (key === "J") {
+    const lineCount = rep.lines.length();
     const joins = Math.min(count, lineCount - 1 - line);
     let cursorChar = lineText.length;
     for (let i = 0; i < joins; i++) {
@@ -1087,65 +789,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (key === ";") {
-    if (lastCharSearch) {
-      const pos = charSearchPos(
-        lastCharSearch.direction,
-        lineText,
-        char,
-        lastCharSearch.target,
-        count,
-      );
-      if (pos !== -1) {
-        desiredColumn = null;
-        moveBlockCursor(editorInfo, line, pos);
-      }
-    }
-    return true;
-  }
-
-  if (key === ",") {
-    if (lastCharSearch) {
-      const opposite = { f: "F", F: "f", t: "T", T: "t" };
-      const reverseDir = opposite[lastCharSearch.direction];
-      const pos = charSearchPos(
-        reverseDir,
-        lineText,
-        char,
-        lastCharSearch.target,
-        count,
-      );
-      if (pos !== -1) {
-        desiredColumn = null;
-        moveBlockCursor(editorInfo, line, pos);
-      }
-    }
-    return true;
-  }
-
-  if (key === "}") {
-    desiredColumn = null;
-    const target = paragraphForward(rep, line, count);
-    moveBlockCursor(editorInfo, target, 0);
-    return true;
-  }
-
-  if (key === "{") {
-    desiredColumn = null;
-    const target = paragraphBackward(rep, line, count);
-    moveBlockCursor(editorInfo, target, 0);
-    return true;
-  }
-
   pendingKey = null;
-
-  if (key === "e") {
-    let pos = char;
-    for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
-    moveBlockCursor(editorInfo, line, clampChar(pos, lineText));
-    return true;
-  }
-
   return false;
 };
 
@@ -1184,71 +828,6 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
     setInsertMode(insertMode);
   }
 
-  if (visualMode !== null && pendingKey !== null) {
-    const handled = handleVisualKey(rep, editorInfo, evt.key);
-    evt.preventDefault();
-    return handled || true;
-  }
-
-  if (!insertMode && visualMode === null && pendingKey !== null) {
-    const handled = handleNormalKey(rep, editorInfo, evt.key);
-    evt.preventDefault();
-    return handled || true;
-  }
-
-  if (
-    !insertMode &&
-    visualMode !== null &&
-    (evt.key === "i" || evt.key === "a")
-  ) {
-    const handled = handleVisualKey(rep, editorInfo, evt.key);
-    evt.preventDefault();
-    return handled || true;
-  }
-
-  if (!insertMode && evt.key === "i") {
-    const [line, char] = rep.selStart;
-    desiredColumn = null;
-    moveCursor(editorInfo, line, char);
-    setVisualMode(null);
-    setInsertMode(true);
-    evt.preventDefault();
-    return true;
-  }
-
-  if (!insertMode && evt.key === "a") {
-    const [line, char] = rep.selStart;
-    const lineText = getLineText(rep, line);
-    desiredColumn = null;
-    moveCursor(editorInfo, line, Math.min(char + 1, lineText.length));
-    setVisualMode(null);
-    setInsertMode(true);
-    evt.preventDefault();
-    return true;
-  }
-
-  if (!insertMode && evt.key === "A") {
-    const [line] = rep.selStart;
-    const lineText = getLineText(rep, line);
-    desiredColumn = null;
-    moveCursor(editorInfo, line, lineText.length);
-    setVisualMode(null);
-    setInsertMode(true);
-    evt.preventDefault();
-    return true;
-  }
-
-  if (!insertMode && evt.key === "I") {
-    const [line] = rep.selStart;
-    const lineText = getLineText(rep, line);
-    desiredColumn = null;
-    moveCursor(editorInfo, line, firstNonBlank(lineText));
-    setVisualMode(null);
-    setInsertMode(true);
-    evt.preventDefault();
-    return true;
-  }
-
   if (evt.key === "Escape") {
     if (insertMode) {
       setInsertMode(false);
@@ -1262,43 +841,83 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
     }
     countBuffer = "";
     pendingKey = null;
+    pendingOperator = null;
     pendingCount = null;
     desiredColumn = null;
     evt.preventDefault();
     return true;
   }
 
-  if (!insertMode && visualMode === null && evt.key === "V") {
-    const [line] = rep.selStart;
-    visualAnchor = [line, 0];
-    visualCursor = [line, 0];
-    setVisualMode("line");
-    updateVisualSelection(editorInfo, rep);
-    evt.preventDefault();
-    return true;
-  }
+  if (insertMode) return false;
 
-  if (!insertMode && visualMode === null && evt.key === "v") {
-    const [line, char] = rep.selStart;
-    visualAnchor = [line, char];
-    visualCursor = [line, char];
-    setVisualMode("char");
-    updateVisualSelection(editorInfo, rep);
-    evt.preventDefault();
-    return true;
-  }
-
-  if (visualMode !== null) {
-    const handled = handleVisualKey(rep, editorInfo, evt.key);
+  if (pendingKey !== null || pendingOperator !== null) {
+    const handled = handleKey(rep, editorInfo, evt.key);
     evt.preventDefault();
     return handled || true;
   }
 
-  if (insertMode) {
-    return false;
+  if (visualMode === null) {
+    if (evt.key === "i") {
+      const [line, char] = rep.selStart;
+      desiredColumn = null;
+      moveCursor(editorInfo, line, char);
+      setInsertMode(true);
+      evt.preventDefault();
+      return true;
+    }
+
+    if (evt.key === "a") {
+      const [line, char] = rep.selStart;
+      const lineText = getLineText(rep, line);
+      desiredColumn = null;
+      moveCursor(editorInfo, line, Math.min(char + 1, lineText.length));
+      setInsertMode(true);
+      evt.preventDefault();
+      return true;
+    }
+
+    if (evt.key === "A") {
+      const [line] = rep.selStart;
+      const lineText = getLineText(rep, line);
+      desiredColumn = null;
+      moveCursor(editorInfo, line, lineText.length);
+      setInsertMode(true);
+      evt.preventDefault();
+      return true;
+    }
+
+    if (evt.key === "I") {
+      const [line] = rep.selStart;
+      const lineText = getLineText(rep, line);
+      desiredColumn = null;
+      moveCursor(editorInfo, line, firstNonBlank(lineText));
+      setInsertMode(true);
+      evt.preventDefault();
+      return true;
+    }
+
+    if (evt.key === "V") {
+      const [line] = rep.selStart;
+      visualAnchor = [line, 0];
+      visualCursor = [line, 0];
+      setVisualMode("line");
+      updateVisualSelection(editorInfo, rep);
+      evt.preventDefault();
+      return true;
+    }
+
+    if (evt.key === "v") {
+      const [line, char] = rep.selStart;
+      visualAnchor = [line, char];
+      visualCursor = [line, char];
+      setVisualMode("char");
+      updateVisualSelection(editorInfo, rep);
+      evt.preventDefault();
+      return true;
+    }
   }
 
-  const handled = handleNormalKey(rep, editorInfo, evt.key);
+  const handled = handleKey(rep, editorInfo, evt.key);
   evt.preventDefault();
   return handled || true;
 };
