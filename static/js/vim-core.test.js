@@ -17,9 +17,9 @@ const {
   charSearchPos,
   motionRange,
   charMotionRange,
-  innerWordRange,
-  innerQuoteRange,
-  innerBracketRange,
+  textWordRange,
+  textQuoteRange,
+  textBracketRange,
   getVisualSelection,
   paragraphForward,
   paragraphBackward,
@@ -360,185 +360,203 @@ describe("charMotionRange", () => {
 
 describe("innerWordRange", () => {
   it("selects the whole word when cursor is in the middle", () => {
-    assert.deepEqual(innerWordRange("hello world", 2), { start: 0, end: 5 });
+    assert.deepEqual(textWordRange("hello world", 2, "i"), {
+      start: 0,
+      end: 5,
+    });
   });
 
   it("selects the whole word when cursor is at the start", () => {
-    assert.deepEqual(innerWordRange("hello world", 0), { start: 0, end: 5 });
+    assert.deepEqual(textWordRange("hello world", 0, "i"), {
+      start: 0,
+      end: 5,
+    });
   });
 
   it("selects the whole word when cursor is at the end", () => {
-    assert.deepEqual(innerWordRange("hello world", 4), { start: 0, end: 5 });
+    assert.deepEqual(textWordRange("hello world", 4, "i"), {
+      start: 0,
+      end: 5,
+    });
   });
 
   it("selects a word in the middle of a line", () => {
-    assert.deepEqual(innerWordRange("hello world foo", 6), {
+    assert.deepEqual(textWordRange("hello world foo", 6, "i"), {
       start: 6,
       end: 11,
     });
   });
 
   it("selects whitespace when cursor is on whitespace", () => {
-    assert.deepEqual(innerWordRange("hello   world", 6), { start: 5, end: 8 });
+    assert.deepEqual(textWordRange("hello   world", 6, "i"), {
+      start: 5,
+      end: 8,
+    });
   });
 
   it("selects a run of punctuation", () => {
-    assert.deepEqual(innerWordRange("foo...bar", 3), { start: 3, end: 6 });
+    assert.deepEqual(textWordRange("foo...bar", 3, "i"), { start: 3, end: 6 });
   });
 
   it("returns null for empty string", () => {
-    assert.equal(innerWordRange("", 0), null);
+    assert.equal(textWordRange("", 0, "i"), null);
   });
 
   it("returns null when char is out of bounds", () => {
-    assert.equal(innerWordRange("hello", 10), null);
+    assert.equal(textWordRange("hello", 10, "i"), null);
   });
 
   it("selects a single-char word", () => {
-    assert.deepEqual(innerWordRange("a b c", 2), { start: 2, end: 3 });
+    assert.deepEqual(textWordRange("a b c", 2, "i"), { start: 2, end: 3 });
   });
 
   it("selects word with underscores", () => {
-    assert.deepEqual(innerWordRange("foo_bar baz", 3), { start: 0, end: 7 });
+    assert.deepEqual(textWordRange("foo_bar baz", 3, "i"), {
+      start: 0,
+      end: 7,
+    });
   });
 
   it("selects word with digits", () => {
-    assert.deepEqual(innerWordRange("abc123 xyz", 4), { start: 0, end: 6 });
+    assert.deepEqual(textWordRange("abc123 xyz", 4, "i"), { start: 0, end: 6 });
   });
 
   it("selects single whitespace char between words", () => {
-    assert.deepEqual(innerWordRange("hello world", 5), { start: 5, end: 6 });
+    assert.deepEqual(textWordRange("hello world", 5, "i"), {
+      start: 5,
+      end: 6,
+    });
   });
 
   it("selects last word on line", () => {
-    assert.deepEqual(innerWordRange("foo bar", 4), { start: 4, end: 7 });
+    assert.deepEqual(textWordRange("foo bar", 4, "i"), { start: 4, end: 7 });
   });
 
   it("handles cursor at last char of line", () => {
-    assert.deepEqual(innerWordRange("hello", 4), { start: 0, end: 5 });
+    assert.deepEqual(textWordRange("hello", 4, "i"), { start: 0, end: 5 });
   });
 
   it("selects a single-char line", () => {
-    assert.deepEqual(innerWordRange("x", 0), { start: 0, end: 1 });
+    assert.deepEqual(textWordRange("x", 0, "i"), { start: 0, end: 1 });
   });
 });
 
-describe("innerQuoteRange", () => {
+describe("textQuoteRange", () => {
   it("selects content between double quotes", () => {
-    assert.deepEqual(innerQuoteRange('say "hello" ok', 6, '"'), {
+    assert.deepEqual(textQuoteRange('say "hello" ok', 6, '"', "i"), {
       start: 5,
       end: 10,
     });
   });
 
   it("works when cursor is on the opening quote", () => {
-    assert.deepEqual(innerQuoteRange('say "hello" ok', 4, '"'), {
+    assert.deepEqual(textQuoteRange('say "hello" ok', 4, '"', "i"), {
       start: 5,
       end: 10,
     });
   });
 
   it("works when cursor is on the closing quote", () => {
-    assert.deepEqual(innerQuoteRange('say "hello" ok', 10, '"'), {
+    assert.deepEqual(textQuoteRange('say "hello" ok', 10, '"', "i"), {
       start: 5,
       end: 10,
     });
   });
 
   it("returns null when no quotes exist", () => {
-    assert.equal(innerQuoteRange("no quotes here", 3, '"'), null);
+    assert.equal(textQuoteRange("no quotes here", 3, '"', "i"), null);
   });
 
   it("returns null when only one quote exists", () => {
-    assert.equal(innerQuoteRange('say "hello', 6, '"'), null);
+    assert.equal(textQuoteRange('say "hello', 6, '"', "i"), null);
   });
 
   it("returns null when cursor is outside the quotes", () => {
-    assert.equal(innerQuoteRange('say "hello" ok', 12, '"'), null);
+    assert.equal(textQuoteRange('say "hello" ok', 12, '"', "i"), null);
   });
 
   it("works with single quotes", () => {
-    assert.deepEqual(innerQuoteRange("say 'fine' ok", 7, "'"), {
+    assert.deepEqual(textQuoteRange("say 'fine' ok", 7, "'", "i"), {
       start: 5,
       end: 9,
     });
   });
 
   it("selects empty content between adjacent quotes", () => {
-    assert.deepEqual(innerQuoteRange('foo "" bar', 4, '"'), {
+    assert.deepEqual(textQuoteRange('foo "" bar', 4, '"', "i"), {
       start: 5,
       end: 5,
     });
   });
 });
 
-describe("innerBracketRange", () => {
+describe("textBracketRange", () => {
   it("selects content inside parentheses", () => {
-    assert.deepEqual(innerBracketRange("foo(bar)baz", 5, "("), {
+    assert.deepEqual(textBracketRange("foo(bar)baz", 5, "(", "i"), {
       start: 4,
       end: 7,
     });
   });
 
   it("works with closing bracket as argument", () => {
-    assert.deepEqual(innerBracketRange("foo(bar)baz", 5, ")"), {
+    assert.deepEqual(textBracketRange("foo(bar)baz", 5, ")", "i"), {
       start: 4,
       end: 7,
     });
   });
 
   it("selects content inside curly braces", () => {
-    assert.deepEqual(innerBracketRange("if {yes} no", 5, "{"), {
+    assert.deepEqual(textBracketRange("if {yes} no", 5, "{", "i"), {
       start: 4,
       end: 7,
     });
   });
 
   it("selects content inside square brackets", () => {
-    assert.deepEqual(innerBracketRange("a[bc]d", 2, "["), {
+    assert.deepEqual(textBracketRange("a[bc]d", 2, "[", "i"), {
       start: 2,
       end: 4,
     });
   });
 
   it("handles nested brackets", () => {
-    assert.deepEqual(innerBracketRange("(a(b)c)", 3, "("), {
+    assert.deepEqual(textBracketRange("(a(b)c)", 3, "(", "i"), {
       start: 3,
       end: 4,
     });
   });
 
   it("handles nested brackets from outer position", () => {
-    assert.deepEqual(innerBracketRange("(a(b)c)", 1, "("), {
+    assert.deepEqual(textBracketRange("(a(b)c)", 1, "(", "i"), {
       start: 1,
       end: 6,
     });
   });
 
   it("returns null when no matching brackets", () => {
-    assert.equal(innerBracketRange("no brackets", 3, "("), null);
+    assert.equal(textBracketRange("no brackets", 3, "(", "i"), null);
   });
 
   it("returns null when cursor is outside brackets", () => {
-    assert.equal(innerBracketRange("x (foo) y", 0, "("), null);
+    assert.equal(textBracketRange("x (foo) y", 0, "(", "i"), null);
   });
 
   it("selects empty content between adjacent brackets", () => {
-    assert.deepEqual(innerBracketRange("foo()bar", 4, "("), {
+    assert.deepEqual(textBracketRange("foo()bar", 4, "(", "i"), {
       start: 4,
       end: 4,
     });
   });
 
   it("works when cursor is on the opening bracket", () => {
-    assert.deepEqual(innerBracketRange("(hello)", 0, "("), {
+    assert.deepEqual(textBracketRange("(hello)", 0, "(", "i"), {
       start: 1,
       end: 6,
     });
   });
 
   it("works when cursor is on the closing bracket", () => {
-    assert.deepEqual(innerBracketRange("(hello)", 6, ")"), {
+    assert.deepEqual(textBracketRange("(hello)", 6, ")", "i"), {
       start: 1,
       end: 6,
     });

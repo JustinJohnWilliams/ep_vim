@@ -11,9 +11,9 @@ const {
   charSearchPos,
   motionRange,
   charMotionRange,
-  innerWordRange,
-  innerQuoteRange,
-  innerBracketRange,
+  textWordRange,
+  textQuoteRange,
+  textBracketRange,
   getVisualSelection,
   paragraphForward,
   paragraphBackward,
@@ -40,11 +40,11 @@ let lastCharSearch = null;
 const QUOTE_CHARS = new Set(['"', "'"]);
 const BRACKET_CHARS = new Set(["(", ")", "{", "}", "[", "]"]);
 
-const innerTextObjectRange = (key, lineText, char) => {
-  if (key === "w") return innerWordRange(lineText, char);
-  if (QUOTE_CHARS.has(key)) return innerQuoteRange(lineText, char, key);
-  if (BRACKET_CHARS.has(key)) return innerBracketRange(lineText, char, key);
-  return null;
+const textObjectRange = (key, lineText, char, type) => {
+  if (key === "w") return textWordRange(lineText, char);
+  if (QUOTE_CHARS.has(key)) return textQuoteRange(lineText, char, key, type);
+  if (BRACKET_CHARS.has(key))
+    return textBracketRange(lineText, char, key, type);
 };
 
 // --- Count helpers ---
@@ -147,6 +147,23 @@ const handleVisualKey = (rep, editorInfo, key) => {
   const curLine = visualCursor[0];
   const curChar = visualCursor[1];
   const lineText = getLineText(rep, curLine);
+
+  if (key === "i" || key === "a") {
+    pendingKey = key;
+    return true;
+  }
+
+  if (pendingKey === "i" || pendingKey === "a") {
+    const range = textObjectRange(key, lineText, curChar, pendingKey);
+    pendingKey = null;
+    if (range) {
+      visualAnchor = [curLine, range.start];
+      visualCursor = [curLine, range.end];
+      setVisualMode("char");
+      updateVisualSelection(editorInfo, rep);
+    }
+    return true;
+  }
 
   if (key >= "1" && key <= "9") {
     countBuffer += key;
@@ -559,9 +576,9 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (pendingKey === "di") {
+  if (pendingKey === "di" || pendingKey === "da") {
+    const range = textObjectRange(key, lineText, char, pendingKey[1]);
     pendingKey = null;
-    const range = innerTextObjectRange(key, lineText, char);
     if (range) {
       setRegister(lineText.slice(range.start, range.end));
       replaceRange(editorInfo, [line, range.start], [line, range.end], "");
@@ -666,9 +683,9 @@ const handleNormalKey = (rep, editorInfo, key) => {
     return true;
   }
 
-  if (pendingKey === "ci") {
+  if (pendingKey === "ci" || pendingKey === "ca") {
+    const range = textObjectRange(key, lineText, char, pendingKey[1]);
     pendingKey = null;
-    const range = innerTextObjectRange(key, lineText, char);
     if (range) {
       setRegister(lineText.slice(range.start, range.end));
       replaceRange(editorInfo, [line, range.start], [line, range.end], "");
@@ -710,8 +727,8 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (pendingKey === "yi") {
+    const range = textObjectRange(key, lineText, char, pendingKey[1]);
     pendingKey = null;
-    const range = innerTextObjectRange(key, lineText, char);
     if (range) {
       setRegister(lineText.slice(range.start, range.end));
     }
@@ -1167,6 +1184,16 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
 
   if (!insertMode && visualMode === null && pendingKey !== null) {
     const handled = handleNormalKey(rep, editorInfo, evt.key);
+    evt.preventDefault();
+    return handled || true;
+  }
+
+  if (
+    !insertMode &&
+    visualMode !== null &&
+    (evt.key === "i" || evt.key === "a")
+  ) {
+    const handled = handleVisualKey(rep, editorInfo, evt.key);
     evt.preventDefault();
     return handled || true;
   }
