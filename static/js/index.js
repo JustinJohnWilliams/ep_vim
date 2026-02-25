@@ -29,6 +29,7 @@ let register = null;
 let marks = {};
 let editorDoc = null;
 let currentRep = null;
+let desiredColumn = null;
 
 // --- Count helpers ---
 
@@ -153,6 +154,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
     pendingKey = null;
     const pos = charSearchPos(direction, lineText, curChar, key, count);
     if (pos !== -1) {
+      desiredColumn = null;
       visualCursor = [curLine, pos];
       updateVisualSelection(editorInfo, rep);
     }
@@ -164,6 +166,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
     pendingKey = null;
     if (key >= "a" && key <= "z" && marks[key]) {
       const [markLine, markChar] = marks[key];
+      desiredColumn = null;
       if (jumpType === "'") {
         const targetLineText = getLineText(rep, markLine);
         visualCursor = [markLine, firstNonBlank(targetLineText)];
@@ -176,48 +179,64 @@ const handleVisualKey = (rep, editorInfo, key) => {
   }
 
   if (key === "h") {
+    desiredColumn = null;
     visualCursor = [curLine, Math.max(0, curChar - count)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "l") {
+    desiredColumn = null;
     visualCursor = [curLine, clampChar(curChar + count, lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "j") {
-    visualCursor = [clampLine(curLine + count, rep), curChar];
+    if (desiredColumn === null) {
+      desiredColumn = curChar;
+    }
+    const newLine = clampLine(curLine + count, rep);
+    const newLineText = getLineText(rep, newLine);
+    visualCursor = [newLine, clampChar(desiredColumn, newLineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "k") {
-    visualCursor = [clampLine(curLine - count, rep), curChar];
+    if (desiredColumn === null) {
+      desiredColumn = curChar;
+    }
+    const newLine = clampLine(curLine - count, rep);
+    const newLineText = getLineText(rep, newLine);
+    visualCursor = [newLine, clampChar(desiredColumn, newLineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "0") {
+    desiredColumn = null;
     visualCursor = [curLine, 0];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "$") {
+    desiredColumn = null;
     visualCursor = [curLine, clampChar(lineText.length - 1, lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "^") {
+    desiredColumn = null;
     visualCursor = [curLine, firstNonBlank(lineText)];
     updateVisualSelection(editorInfo, rep);
     return true;
   }
 
   if (key === "w") {
+    desiredColumn = null;
     let pos = curChar;
     for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
     visualCursor = [curLine, clampChar(pos, lineText)];
@@ -226,6 +245,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
   }
 
   if (key === "b") {
+    desiredColumn = null;
     let pos = curChar;
     for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
     visualCursor = [curLine, pos];
@@ -234,6 +254,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
   }
 
   if (key === "e") {
+    desiredColumn = null;
     let pos = curChar;
     for (let i = 0; i < count; i++) pos = wordEnd(lineText, pos);
     visualCursor = [curLine, clampChar(pos, lineText)];
@@ -243,6 +264,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
 
   if (key === "G") {
     pendingKey = null;
+    desiredColumn = null;
     if (pendingCount !== null) {
       visualCursor = [clampLine(pendingCount - 1, rep), curChar];
     } else {
@@ -255,6 +277,7 @@ const handleVisualKey = (rep, editorInfo, key) => {
   if (key === "g") {
     if (pendingKey === "g") {
       pendingKey = null;
+      desiredColumn = null;
       visualCursor = [0, curChar];
       updateVisualSelection(editorInfo, rep);
     } else {
@@ -416,7 +439,10 @@ const handleNormalKey = (rep, editorInfo, key) => {
     const direction = pendingKey;
     pendingKey = null;
     const pos = charSearchPos(direction, lineText, char, key, count);
-    if (pos !== -1) moveBlockCursor(editorInfo, line, pos);
+    if (pos !== -1) {
+      desiredColumn = null;
+      moveBlockCursor(editorInfo, line, pos);
+    }
     return true;
   }
 
@@ -597,6 +623,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
     pendingKey = null;
     if (key >= "a" && key <= "z" && marks[key]) {
       const [markLine, markChar] = marks[key];
+      desiredColumn = null;
       if (jumpType === "'") {
         const targetLineText = getLineText(rep, markLine);
         moveBlockCursor(editorInfo, markLine, firstNonBlank(targetLineText));
@@ -608,40 +635,51 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === "h") {
+    desiredColumn = null;
     moveBlockCursor(editorInfo, line, Math.max(0, char - count));
     return true;
   }
 
   if (key === "l") {
+    desiredColumn = null;
     moveBlockCursor(editorInfo, line, clampChar(char + count, lineText));
     return true;
   }
 
   if (key === "k") {
+    if (desiredColumn === null) {
+      desiredColumn = char;
+    }
     const newLine = clampLine(line - count, rep);
     const newLineText = getLineText(rep, newLine);
-    moveBlockCursor(editorInfo, newLine, clampChar(char, newLineText));
+    moveBlockCursor(editorInfo, newLine, clampChar(desiredColumn, newLineText));
     return true;
   }
 
   if (key === "j") {
+    if (desiredColumn === null) {
+      desiredColumn = char;
+    }
     const newLine = clampLine(line + count, rep);
     const newLineText = getLineText(rep, newLine);
-    moveBlockCursor(editorInfo, newLine, clampChar(char, newLineText));
+    moveBlockCursor(editorInfo, newLine, clampChar(desiredColumn, newLineText));
     return true;
   }
 
   if (key === "0") {
+    desiredColumn = null;
     moveBlockCursor(editorInfo, line, 0);
     return true;
   }
 
   if (key === "$") {
+    desiredColumn = null;
     moveBlockCursor(editorInfo, line, clampChar(lineText.length - 1, lineText));
     return true;
   }
 
   if (key === "^") {
+    desiredColumn = null;
     moveBlockCursor(editorInfo, line, firstNonBlank(lineText));
     return true;
   }
@@ -657,6 +695,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === "w") {
+    desiredColumn = null;
     let pos = char;
     for (let i = 0; i < count; i++) pos = wordForward(lineText, pos);
     moveBlockCursor(editorInfo, line, clampChar(pos, lineText));
@@ -664,6 +703,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === "b") {
+    desiredColumn = null;
     let pos = char;
     for (let i = 0; i < count; i++) pos = wordBackward(lineText, pos);
     moveBlockCursor(editorInfo, line, pos);
@@ -742,6 +782,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   }
 
   if (key === "G") {
+    desiredColumn = null;
     if (pendingCount !== null) {
       moveBlockCursor(editorInfo, clampLine(pendingCount - 1, rep), 0);
     } else {
@@ -753,6 +794,7 @@ const handleNormalKey = (rep, editorInfo, key) => {
   if (key === "g") {
     if (pendingKey === "g") {
       pendingKey = null;
+      desiredColumn = null;
       moveBlockCursor(editorInfo, 0, 0);
     } else {
       pendingKey = "g";
@@ -901,6 +943,7 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
 
   if (!insertMode && evt.key === "i") {
     const [line, char] = rep.selStart;
+    desiredColumn = null;
     moveCursor(editorInfo, line, char);
     setVisualMode(null);
     setInsertMode(true);
@@ -911,6 +954,7 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
   if (!insertMode && evt.key === "a") {
     const [line, char] = rep.selStart;
     const lineText = getLineText(rep, line);
+    desiredColumn = null;
     moveCursor(editorInfo, line, Math.min(char + 1, lineText.length));
     setVisualMode(null);
     setInsertMode(true);
@@ -921,6 +965,7 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
   if (!insertMode && evt.key === "A") {
     const [line] = rep.selStart;
     const lineText = getLineText(rep, line);
+    desiredColumn = null;
     moveCursor(editorInfo, line, lineText.length);
     setVisualMode(null);
     setInsertMode(true);
@@ -931,6 +976,7 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
   if (!insertMode && evt.key === "I") {
     const [line] = rep.selStart;
     const lineText = getLineText(rep, line);
+    desiredColumn = null;
     moveCursor(editorInfo, line, firstNonBlank(lineText));
     setVisualMode(null);
     setInsertMode(true);
@@ -952,6 +998,7 @@ exports.aceKeyEvent = (_hookName, { evt, rep, editorInfo }) => {
     countBuffer = "";
     pendingKey = null;
     pendingCount = null;
+    desiredColumn = null;
     evt.preventDefault();
     return true;
   }
